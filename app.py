@@ -173,12 +173,34 @@ p, div, label, span { font-family: 'IBM Plex Sans', sans-serif; }
 # SUPABASE
 # ─────────────────────────────────────────
 @st.cache_resource
-def get_supabase() -> Client:
-    url  = st.secrets["supabase"]["url"]
-    key  = st.secrets["supabase"]["key"]
+def get_supabase():
+    # Verificar que los secrets existen
+    if "supabase" not in st.secrets:
+        return None
+    url = st.secrets["supabase"].get("url", "").strip()
+    key = st.secrets["supabase"].get("key", "").strip()
+    if not url or not key or url == "https://XXXXXXXXXXXXXXXXXX.supabase.co":
+        return None
     return create_client(url, key)
 
 supabase = get_supabase()
+
+# Mostrar error claro si no hay conexión
+if supabase is None:
+    st.error("⚠️ **No se pudo conectar a Supabase.** Verificá que los Secrets estén bien configurados.")
+    st.markdown("""
+    **Pasos para solucionarlo:**
+    1. En Streamlit Cloud → **Manage app** → **Secrets**
+    2. Asegurate de que el contenido sea exactamente:
+    ```toml
+    [supabase]
+    url = "https://TU-PROYECTO.supabase.co"
+    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    ```
+    3. La key debe ser la **anon public** (en Supabase: *Project Settings → API → anon public*)
+    4. Guardá los Secrets y hacé **Reboot app**
+    """)
+    st.stop()
 
 # ─────────────────────────────────────────
 # CONSTANTE DE CONTRASEÑA
@@ -201,13 +223,21 @@ def ts():
 
 @st.cache_data(ttl=10)
 def get_items():
-    res = supabase.table("paniol_items").select("*").order("nombre").execute()
-    return res.data or []
+    try:
+        res = supabase.table("paniol_items").select("*").order("nombre").execute()
+        return res.data or []
+    except Exception as e:
+        st.error(f"❌ Error al conectar con Supabase: `{type(e).__name__}`\n\nVerificá tu URL y key en los Secrets.")
+        st.stop()
 
 @st.cache_data(ttl=10)
 def get_movimientos():
-    res = supabase.table("paniol_movimientos").select("*").order("fecha", desc=True).limit(300).execute()
-    return res.data or []
+    try:
+        res = supabase.table("paniol_movimientos").select("*").order("fecha", desc=True).limit(300).execute()
+        return res.data or []
+    except Exception as e:
+        st.error(f"❌ Error al obtener historial: `{type(e).__name__}`")
+        return []
 
 def invalidar_cache():
     get_items.clear()

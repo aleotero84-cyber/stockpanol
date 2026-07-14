@@ -1,5 +1,5 @@
 """
-Pañol — Control de Stock (Multi-almacén)
+Pañol — Control de Stock
 Streamlit + Supabase
 """
 
@@ -7,9 +7,6 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
-import hashlib
-import base64
-import os
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN DE PÁGINA
@@ -59,15 +56,6 @@ p, div, label, span { font-family: 'IBM Plex Sans', sans-serif; }
 .pn-stat-lbl { font-size: 11px; color: #5e6585; text-transform: uppercase; letter-spacing: 1px; }
 .pn-stat-num.warn { color: #ff8c42; }
 .pn-stat-num.ok   { color: #3dca7a; }
-
-/* Selector de almacén activo (pill en el header) */
-.pn-almacen-pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: #1c2030; border: 1px solid #2c3050;
-    border-radius: 20px; padding: 6px 16px;
-    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
-    color: #f0c040; letter-spacing: .5px;
-}
 
 /* Tabs */
 [data-testid="stTabs"] button {
@@ -171,19 +159,6 @@ p, div, label, span { font-family: 'IBM Plex Sans', sans-serif; }
 .login-title { font-family: 'IBM Plex Mono', monospace; font-size: 16px; color: #f0c040; margin-bottom: 6px; }
 .login-sub   { font-size: 13px; color: #5e6585; margin-bottom: 20px; }
 
-/* Tarjetas de almacén (pantalla de selección) */
-.alm-card {
-    background: #151821;
-    border: 1px solid #2c3050;
-    border-radius: 12px;
-    padding: 22px;
-    text-align: center;
-    transition: border-color .15s;
-}
-.alm-card:hover { border-color: #f0c040; }
-.alm-icon { font-size: 34px; margin-bottom: 8px; }
-.alm-nombre { font-family: 'IBM Plex Mono', monospace; font-size: 15px; color: #e0e4f5; font-weight: 600; }
-
 /* Divider */
 .pn-divider { border: none; border-top: 1px solid #2c3050; margin: 16px 0; }
 
@@ -199,6 +174,7 @@ p, div, label, span { font-family: 'IBM Plex Sans', sans-serif; }
 # ─────────────────────────────────────────
 @st.cache_resource
 def get_supabase():
+    # Verificar que los secrets existen
     if "supabase" not in st.secrets:
         return None
     url = st.secrets["supabase"].get("url", "").strip()
@@ -209,6 +185,7 @@ def get_supabase():
 
 supabase = get_supabase()
 
+# Mostrar error claro si no hay conexión
 if supabase is None:
     st.error("⚠️ **No se pudo conectar a Supabase.** Verificá que los Secrets estén bien configurados.")
     st.markdown("""
@@ -226,114 +203,37 @@ if supabase is None:
     st.stop()
 
 # ─────────────────────────────────────────
-# HELPERS GENERALES
+# CONSTANTE DE CONTRASEÑA
 # ─────────────────────────────────────────
-def ts():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def hash_clave(clave: str) -> str:
-    return hashlib.sha256(clave.encode("utf-8")).hexdigest()
-
-def slugificar(nombre: str) -> str:
-    s = nombre.strip().lower()
-    out = []
-    for ch in s:
-        if ch.isalnum():
-            out.append(ch)
-        elif ch in (" ", "_", "-"):
-            out.append("-")
-    slug = "".join(out)
-    while "--" in slug:
-        slug = slug.replace("--", "-")
-    return slug.strip("-") or "almacen"
-
-def get_base64_image(image_path):
-    if os.path.exists(image_path):
-        with open(image_path, "rb") as img_file:
-            return base64.b64encode(img_file.read()).decode()
-    return None
+CLAVE_ADMIN = "panol.unqui.iaci"
 
 # ─────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────
-if "almacen_id" not in st.session_state:
-    st.session_state.almacen_id = None
-if "almacen_nombre" not in st.session_state:
-    st.session_state.almacen_nombre = None
-if "almacen_icono" not in st.session_state:
-    st.session_state.almacen_icono = "📦"
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "msg" not in st.session_state:
     st.session_state.msg = None   # ("tipo", "texto")
-if "confirmar_borrado_id" not in st.session_state:
-    st.session_state.confirmar_borrado_id = None  # id del almacén que se está intentando borrar
 
 # ─────────────────────────────────────────
-# HELPERS DE DB — ALMACENES
+# HELPERS DE DB
 # ─────────────────────────────────────────
+def ts():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 @st.cache_data(ttl=10)
-def get_almacenes():
+def get_items():
     try:
-        res = supabase.table("paniol_almacenes").select("id,nombre,slug,icono,creado").order("nombre").execute()
-        return res.data or []
-    except Exception as e:
-        st.error(f"❌ Error al obtener almacenes: `{type(e).__name__}`")
-        return []
-
-def crear_almacen(nombre, icono, clave):
-    slug_base = slugificar(nombre)
-    slug = slug_base
-    existentes = {a["slug"] for a in get_almacenes()}
-    n = 2
-    while slug in existentes:
-        slug = f"{slug_base}-{n}"
-        n += 1
-    res = supabase.table("paniol_almacenes").insert({
-        "nombre": nombre.strip(),
-        "slug": slug,
-        "icono": icono or "📦",
-        "clave_hash": hash_clave(clave),
-    }).execute()
-    get_almacenes.clear()
-    return res.data[0] if res.data else None
-
-def verificar_clave_almacen(almacen_id, clave) -> bool:
-    try:
-        res = supabase.table("paniol_almacenes").select("clave_hash").eq("id", almacen_id).single().execute()
-        if not res.data:
-            return False
-        return res.data["clave_hash"] == hash_clave(clave)
-    except Exception:
-        return False
-
-def eliminar_almacen(almacen_id):
-    # Las tablas relacionadas tienen ON DELETE CASCADE, así que borrar el
-    # almacén borra automáticamente todos sus ítems y movimientos.
-    supabase.table("paniol_almacenes").delete().eq("id", almacen_id).execute()
-    get_almacenes.clear()
-    invalidar_cache()
-
-# ─────────────────────────────────────────
-# HELPERS DE DB — ÍTEMS / MOVIMIENTOS (filtrados por almacén)
-# ─────────────────────────────────────────
-@st.cache_data(ttl=10)
-def get_items(almacen_id):
-    try:
-        res = (supabase.table("paniol_items")
-               .select("*").eq("almacen_id", almacen_id)
-               .order("nombre").execute())
+        res = supabase.table("paniol_items").select("*").order("nombre").execute()
         return res.data or []
     except Exception as e:
         st.error(f"❌ Error al conectar con Supabase: `{type(e).__name__}`\n\nVerificá tu URL y key en los Secrets.")
         st.stop()
 
 @st.cache_data(ttl=10)
-def get_movimientos(almacen_id):
+def get_movimientos():
     try:
-        res = (supabase.table("paniol_movimientos")
-               .select("*").eq("almacen_id", almacen_id)
-               .order("fecha", desc=True).limit(300).execute())
+        res = supabase.table("paniol_movimientos").select("*").order("fecha", desc=True).limit(300).execute()
         return res.data or []
     except Exception as e:
         st.error(f"❌ Error al obtener historial: `{type(e).__name__}`")
@@ -342,18 +242,20 @@ def get_movimientos(almacen_id):
 def invalidar_cache():
     get_items.clear()
     get_movimientos.clear()
+    get_unidades.clear()
 
-def agregar_item(almacen_id, nombre, categoria, ubicacion, cantidad, minimo, descripcion):
+def agregar_item(nombre, categoria, ubicacion, numero_patrimonio, cantidad, minimo, descripcion):
     supabase.table("paniol_items").insert({
-        "almacen_id": almacen_id,
         "nombre": nombre, "categoria": categoria, "ubicacion": ubicacion,
+        "numero_patrimonio": numero_patrimonio,
         "cantidad": cantidad, "minimo": minimo, "descripcion": descripcion,
     }).execute()
     invalidar_cache()
 
-def editar_item(id_, nombre, categoria, ubicacion, cantidad, minimo, descripcion):
+def editar_item(id_, nombre, categoria, ubicacion, numero_patrimonio, cantidad, minimo, descripcion):
     supabase.table("paniol_items").update({
         "nombre": nombre, "categoria": categoria, "ubicacion": ubicacion,
+        "numero_patrimonio": numero_patrimonio,
         "cantidad": cantidad, "minimo": minimo, "descripcion": descripcion,
     }).eq("id", id_).execute()
     invalidar_cache()
@@ -362,11 +264,32 @@ def eliminar_item(id_):
     supabase.table("paniol_items").delete().eq("id", id_).execute()
     invalidar_cache()
 
-def registrar_movimiento(almacen_id, item, tipo, cantidad, responsable):
+@st.cache_data(ttl=10)
+def get_unidades(id_item=None):
+    try:
+        q = supabase.table("paniol_unidades").select("*").order("marca")
+        if id_item is not None:
+            q = q.eq("id_item", id_item)
+        res = q.execute()
+        return res.data or []
+    except Exception as e:
+        st.error(f"❌ Error al obtener unidades: `{type(e).__name__}`")
+        return []
+
+def agregar_unidad(id_item, marca, numero_patrimonio):
+    supabase.table("paniol_unidades").insert({
+        "id_item": id_item, "marca": marca, "numero_patrimonio": numero_patrimonio,
+    }).execute()
+    invalidar_cache()
+
+def eliminar_unidad(id_unidad):
+    supabase.table("paniol_unidades").delete().eq("id", id_unidad).execute()
+    invalidar_cache()
+
+def registrar_movimiento(item, tipo, cantidad, responsable):
     nuevo = item["cantidad"] + cantidad if tipo == "entrada" else item["cantidad"] - cantidad
     supabase.table("paniol_items").update({"cantidad": nuevo}).eq("id", item["id"]).execute()
     supabase.table("paniol_movimientos").insert({
-        "almacen_id": almacen_id,
         "id_item": item["id"], "nombre_item": item["nombre"],
         "tipo": tipo, "cantidad": cantidad,
         "responsable": responsable or "—",
@@ -385,11 +308,18 @@ def render_tabla(items, filtro=""):
         items = [i for i in items if
                  f in i["nombre"].lower() or
                  f in (i.get("categoria") or "").lower() or
-                 f in (i.get("ubicacion") or "").lower()]
+                 f in (i.get("ubicacion") or "").lower() or
+                 f in (i.get("numero_patrimonio") or "").lower()]
 
     if not items:
         st.info("Sin resultados.")
         return
+
+    # Unidades de todos los ítems visibles, agrupadas por id_item
+    todas_unidades = get_unidades()
+    unidades_por_item = {}
+    for u in todas_unidades:
+        unidades_por_item.setdefault(u["id_item"], []).append(u)
 
     filas = []
     for i in items:
@@ -405,10 +335,17 @@ def render_tabla(items, filtro=""):
             est = '<span class="pn-badge pn-badge-ok">● OK</span>'
             num_cls = "pn-ok"
 
+        tiene_unidades = bool(unidades_por_item.get(i["id"]))
+        nombre_celda = i['nombre']
+        if tiene_unidades:
+            n_un = len(unidades_por_item[i["id"]])
+            nombre_celda = f"{i['nombre']} <span class='pn-muted'>▾ {n_un} unidad(es)</span>"
+
         filas.append(f"""
         <tr>
-          <td><span class="pn-name">{i['nombre']}</span></td>
+          <td><span class="pn-name">{nombre_celda}</span></td>
           <td><span class="pn-cat">{i.get('categoria') or '—'}</span></td>
+          <td><span class="pn-muted">{i.get('numero_patrimonio') or '—'}</span></td>
           <td><span class="pn-num {num_cls}">{cant}</span></td>
           <td><span class="pn-muted">{mn}</span></td>
           <td><span class="pn-muted">{i.get('ubicacion') or '—'}</span></td>
@@ -419,7 +356,7 @@ def render_tabla(items, filtro=""):
     <div class="pn-table-wrap">
       <table class="pn-table">
         <thead><tr>
-          <th>Nombre</th><th>Categoría</th><th>Cantidad</th>
+          <th>Nombre</th><th>Categoría</th><th>N° Patrimonio</th><th>Cantidad</th>
           <th>Mínimo</th><th>Ubicación</th><th>Estado</th>
         </tr></thead>
         <tbody>{''.join(filas)}</tbody>
@@ -427,137 +364,53 @@ def render_tabla(items, filtro=""):
     </div>"""
     st.markdown(html, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════
-# PANTALLA: SELECCIÓN DE ALMACÉN
-# (se muestra si todavía no se eligió ninguno)
-# ══════════════════════════════════════════════════════
-def pantalla_seleccion_almacen():
-    logo_base64 = get_base64_image("iacilog.png")
-    logo_html = (f'<img src="data:image/png;base64,{logo_base64}" style="height: 55px; width: auto; max-height: 55px;">'
-                 if logo_base64 else '<div class="pn-logo">PAÑOL</div>')
-
-    st.markdown(f"""
-    <div class="pn-header" style="justify-content:flex-start;gap:15px;">
-        {logo_html}
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:#f0c040;letter-spacing:2px;">PAÑOL</div>
-          <div class="pn-subtitle">CONTROL DE STOCK · MULTI-ALMACÉN</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("#### Elegí un almacén")
-    st.caption("Cada almacén tiene su propio stock, historial y contraseña de administración independiente.")
-
-    almacenes = get_almacenes()
-
-    if not almacenes:
-        st.info("Todavía no hay ningún almacén creado. Creá el primero abajo.")
-    else:
-        cols = st.columns(3)
-        for idx, a in enumerate(almacenes):
-            with cols[idx % 3]:
-                st.markdown(f"""
-                <div class="alm-card">
-                  <div class="alm-icon">{a.get('icono') or '📦'}</div>
-                  <div class="alm-nombre">{a['nombre']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("Ingresar →", key=f"sel_{a['id']}", use_container_width=True):
-                    st.session_state.almacen_id = a["id"]
-                    st.session_state.almacen_nombre = a["nombre"]
-                    st.session_state.almacen_icono = a.get("icono") or "📦"
-                    st.rerun()
-
-                if st.session_state.confirmar_borrado_id == a["id"]:
-                    # ── Panel de confirmación: pide la contraseña DOS VECES ──
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.warning(f"⚠ Vas a borrar **{a['nombre']}** junto con todo su stock e historial. Esta acción no se puede deshacer.")
-                    clave1 = st.text_input("Contraseña del almacén", type="password",
-                                            key=f"del_clave1_{a['id']}")
-                    clave2 = st.text_input("Repetí la contraseña", type="password",
-                                            key=f"del_clave2_{a['id']}")
-                    cb1, cb2 = st.columns(2)
-                    with cb1:
-                        if st.button("🗑️ Confirmar borrado", key=f"del_confirm_{a['id']}", use_container_width=True):
-                            if not clave1 or not clave2:
-                                st.error("Completá la contraseña en los dos campos.")
-                            elif clave1 != clave2:
-                                st.error("Las dos contraseñas ingresadas no coinciden.")
-                            elif not verificar_clave_almacen(a["id"], clave1):
-                                st.error("Contraseña incorrecta.")
-                            else:
-                                eliminar_almacen(a["id"])
-                                # Si el almacén borrado era el activo en la sesión, lo limpiamos
-                                if st.session_state.almacen_id == a["id"]:
-                                    st.session_state.almacen_id = None
-                                    st.session_state.almacen_nombre = None
-                                    st.session_state.autenticado = False
-                                st.session_state.confirmar_borrado_id = None
-                                st.session_state.msg = ("ok", f"✓ Almacén '{a['nombre']}' eliminado.")
-                                st.rerun()
-                    with cb2:
-                        if st.button("Cancelar", key=f"del_cancel_{a['id']}", use_container_width=True):
-                            st.session_state.confirmar_borrado_id = None
-                            st.rerun()
-                else:
-                    if st.button("🗑️ Borrar almacén", key=f"del_{a['id']}", use_container_width=True):
-                        st.session_state.confirmar_borrado_id = a["id"]
-                        st.rerun()
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<hr class='pn-divider'>", unsafe_allow_html=True)
-
-    with st.expander("➕  Crear nuevo almacén (ej: droguería, depósito, otra sede...)"):
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            nuevo_nombre = st.text_input("Nombre del almacén", placeholder="ej: Droguería Central")
-        with c2:
-            nuevo_icono = st.text_input("Ícono (emoji)", value="📦", max_chars=4)
-        nueva_clave  = st.text_input("Contraseña de administración para este almacén", type="password",
-                                      placeholder="Elegí una contraseña segura")
-        nueva_clave2 = st.text_input("Repetir contraseña", type="password")
-
-        if st.button("Crear almacén", use_container_width=True):
-            if not nuevo_nombre.strip():
-                st.error("El nombre del almacén es obligatorio.")
-            elif not nueva_clave:
-                st.error("Definí una contraseña de administración.")
-            elif nueva_clave != nueva_clave2:
-                st.error("Las contraseñas no coinciden.")
-            elif len(nueva_clave) < 4:
-                st.error("Usá una contraseña de al menos 4 caracteres.")
-            else:
-                nuevo = crear_almacen(nuevo_nombre.strip(), nuevo_icono.strip(), nueva_clave)
-                if nuevo:
-                    st.session_state.almacen_id = nuevo["id"]
-                    st.session_state.almacen_nombre = nuevo["nombre"]
-                    st.session_state.almacen_icono = nuevo.get("icono") or "📦"
-                    st.session_state.msg = ("ok", f"✓ Almacén '{nuevo['nombre']}' creado. ¡Guardá bien la contraseña!")
-                    st.rerun()
-                else:
-                    st.error("No se pudo crear el almacén. Intentá de nuevo.")
-
-
-# Si todavía no hay almacén elegido, mostrar selector y detener acá.
-if st.session_state.almacen_id is None:
-    pantalla_seleccion_almacen()
-    st.stop()
-
-ALMACEN_ID = st.session_state.almacen_id
+    # Desplegables con el detalle de unidades, solo para ítems que tienen
+    items_con_unidades = [i for i in items if unidades_por_item.get(i["id"])]
+    if items_con_unidades:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='pn-muted' style='font-family:IBM Plex Mono,monospace;font-size:11px;letter-spacing:1px;'>DETALLE DE UNIDADES POR MARCA</div>", unsafe_allow_html=True)
+        for i in items_con_unidades:
+            unidades = sorted(unidades_por_item[i["id"]], key=lambda u: (u.get("marca") or "", u.get("numero_patrimonio") or ""))
+            with st.expander(f"🔍  {i['nombre']} — {len(unidades)} unidad(es)"):
+                filas_u = "".join(f"""
+                <tr>
+                  <td><span class="pn-name">{u.get('marca') or '—'}</span></td>
+                  <td><span class="pn-muted">{u.get('numero_patrimonio') or '—'}</span></td>
+                </tr>""" for u in unidades)
+                html_u = f"""
+                <div class="pn-table-wrap">
+                  <table class="pn-table">
+                    <thead><tr><th>Marca</th><th>N° Patrimonio</th></tr></thead>
+                    <tbody>{filas_u}</tbody>
+                  </table>
+                </div>"""
+                st.markdown(html_u, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
-# HEADER (con almacén activo)
+# HEADER
 # ─────────────────────────────────────────
+
+import base64
+import os
+
+# Función para convertir la imagen local a Base64
+def get_base64_image(image_path):
+    if os.path.exists(image_path):
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    return None
+
+# Intentar cargar el logo
 logo_base64 = get_base64_image("iacilog.png")
 
-items_all = get_items(ALMACEN_ID)
+items_all = get_items()
 n_total   = len(items_all)
 n_alertas = sum(1 for i in items_all if i["cantidad"] <= (i.get("minimo") or 0))
 n_ok      = n_total - n_alertas
 alerta_cls = "warn" if n_alertas else "ok"
+estado_txt = f"⚠ {n_alertas} alerta(s)" if n_alertas else "✓ Todo normal"
 
+# Generar el HTML del logo o usar texto de respaldo si no encuentra el archivo
 if logo_base64:
     logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 55px; width: auto; max-height: 55px; vertical-align: middle;">'
 else:
@@ -569,9 +422,8 @@ st.markdown(f"""
     {logo_html}
     <div>
       <div style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: #f0c040; letter-spacing: 2px; line-height: 1.2;">PAÑOL</div>
-      <div class="pn-subtitle" style="margin-top: 0px;">CONTROL DE STOCK</div>
+      <div class="pn-subtitle" style="margin-top: 0px;">CONTROL DE STOCK · UNQUI · IACI</div>
     </div>
-    <div class="pn-almacen-pill">{st.session_state.almacen_icono} {st.session_state.almacen_nombre}</div>
   </div>
   <div style="display:flex;gap:40px;align-items:center">
     <div class="pn-stat-box">
@@ -589,14 +441,6 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
-col_cambiar, _ = st.columns([1, 5])
-with col_cambiar:
-    if st.button("⇄  Cambiar de almacén", use_container_width=True):
-        st.session_state.almacen_id = None
-        st.session_state.almacen_nombre = None
-        st.session_state.autenticado = False
-        st.rerun()
 
 # Mostrar mensajes flash
 if st.session_state.msg:
@@ -632,7 +476,7 @@ with tab_stock:
             invalidar_cache()
             st.rerun()
 
-    items_all = get_items(ALMACEN_ID)
+    items_all = get_items()
     render_tabla(items_all, filtro)
 
     if n_alertas:
@@ -640,18 +484,18 @@ with tab_stock:
         st.warning(f"⚠ Hay **{n_alertas}** ítem(s) con stock bajo o agotado.")
 
 # ══════════════════════════════════════════
-# TAB ADMIN — requiere contraseña del almacén activo
+# TAB ADMIN — requiere contraseña
 # ══════════════════════════════════════════
 with tab_admin:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Login ────────────────────────────
     if not st.session_state.autenticado:
-        st.markdown(f"""
+        st.markdown("""
         <div class="login-box">
           <div class="login-icon">🔒</div>
-          <div class="login-title">ADMINISTRACIÓN · {st.session_state.almacen_nombre}</div>
-          <div class="login-sub">Ingresá la contraseña de este almacén para modificar el stock.</div>
+          <div class="login-title">ÁREA DE ADMINISTRACIÓN</div>
+          <div class="login-sub">Ingresá la contraseña para modificar el stock.</div>
         </div>
         """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
@@ -662,7 +506,7 @@ with tab_admin:
                                   placeholder="••••••••••••••••",
                                   label_visibility="visible")
             if st.button("Ingresar →", use_container_width=True):
-                if verificar_clave_almacen(ALMACEN_ID, clave):
+                if clave == CLAVE_ADMIN:
                     st.session_state.autenticado = True
                     st.rerun()
                 else:
@@ -684,11 +528,11 @@ with tab_admin:
         "✕   Eliminar ítem",
         "▲   Registrar entrada",
         "▼   Registrar salida",
-        "🗑️  Borrar este almacén",
+        "⚙   Gestionar unidades (marca/patrimonio)",
     ], label_visibility="visible")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    items_all = get_items(ALMACEN_ID)
+    items_all = get_items()
 
     # ── AGREGAR ───────────────────────────
     if "Agregar" in accion:
@@ -697,6 +541,7 @@ with tab_admin:
         with c1:
             nombre   = st.text_input("Nombre *")
             ubicacion= st.text_input("Ubicación", placeholder="ej: Estante A3")
+            numero_patrimonio = st.text_input("N° de Patrimonio", placeholder="ej: PAT-0001")
             descripcion = st.text_input("Descripción")
         with c2:
             categoria = st.selectbox("Categoría", ["herramienta","material","equipo","consumible","otro"])
@@ -707,8 +552,8 @@ with tab_admin:
             if not nombre.strip():
                 st.error("El nombre es obligatorio.")
             else:
-                agregar_item(ALMACEN_ID, nombre.strip(), categoria, ubicacion.strip(),
-                             cantidad, minimo, descripcion.strip())
+                agregar_item(nombre.strip(), categoria, ubicacion.strip(),
+                             numero_patrimonio.strip(), cantidad, minimo, descripcion.strip())
                 st.session_state.msg = ("ok", f"✓ '{nombre}' agregado correctamente.")
                 st.rerun()
 
@@ -726,6 +571,7 @@ with tab_admin:
             with c1:
                 nombre    = st.text_input("Nombre *",    value=item["nombre"])
                 ubicacion = st.text_input("Ubicación",   value=item.get("ubicacion") or "")
+                numero_patrimonio = st.text_input("N° de Patrimonio", value=item.get("numero_patrimonio") or "")
                 descripcion = st.text_input("Descripción", value=item.get("descripcion") or "")
             with c2:
                 cats = ["herramienta","material","equipo","consumible","otro"]
@@ -739,7 +585,7 @@ with tab_admin:
                     st.error("El nombre es obligatorio.")
                 else:
                     editar_item(item["id"], nombre.strip(), categoria,
-                                ubicacion.strip(), cantidad, minimo, descripcion.strip())
+                                ubicacion.strip(), numero_patrimonio.strip(), cantidad, minimo, descripcion.strip())
                     st.session_state.msg = ("ok", f"✓ '{nombre}' actualizado.")
                     st.rerun()
 
@@ -777,7 +623,7 @@ with tab_admin:
             with c2:
                 responsable = st.text_input("Responsable / Observación")
             if st.button("▲  Confirmar entrada", use_container_width=True):
-                nuevo = registrar_movimiento(ALMACEN_ID, item, "entrada", cantidad, responsable)
+                nuevo = registrar_movimiento(item, "entrada", cantidad, responsable)
                 st.session_state.msg = ("ok", f"✓ Entrada de {cantidad} ud. registrada. Stock nuevo: {nuevo}")
                 st.rerun()
 
@@ -802,46 +648,59 @@ with tab_admin:
                 if cantidad > item["cantidad"]:
                     st.error(f"Stock insuficiente. Disponible: {item['cantidad']}")
                 else:
-                    nuevo = registrar_movimiento(ALMACEN_ID, item, "salida", cantidad, responsable)
+                    nuevo = registrar_movimiento(item, "salida", cantidad, responsable)
                     txt = f"✓ Salida de {cantidad} ud. registrada. Stock nuevo: {nuevo}"
                     tipo = "warn" if nuevo <= (item.get("minimo") or 0) else "ok"
                     st.session_state.msg = (tipo, txt)
                     st.rerun()
 
-    # ── BORRAR ESTE ALMACÉN ───────────────
-    elif "Borrar este almacén" in accion:
-        st.markdown("#### Borrar este almacén")
-        st.error(
-            f"⚠ Esto va a eliminar **{st.session_state.almacen_nombre}** junto con **todo** su stock "
-            f"({n_total} ítems) y su historial de movimientos. **Esta acción no se puede deshacer.**"
-        )
-        st.caption("Para confirmar, ingresá la contraseña de administración dos veces.")
+    # ── GESTIONAR UNIDADES ────────────────
+    elif "unidades" in accion:
+        st.markdown("#### Unidades individuales por ítem")
+        st.markdown(
+            "<span class='pn-muted'>Útil para ítems tipo equipo que agrupan varias unidades de "
+            "distinta marca, cada una con su propio número de patrimonio "
+            "(ej: Osciloscopio Digital → 3 Tektronix, 2 Rigol, 1 Hantek). "
+            "Esto es solo informativo y no afecta la cantidad de stock del ítem.</span>",
+            unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            clave_borrar_1 = st.text_input("Contraseña", type="password", key="borrar_alm_clave1")
-        with c2:
-            clave_borrar_2 = st.text_input("Repetí la contraseña", type="password", key="borrar_alm_clave2")
+        if not items_all:
+            st.info("No hay ítems cargados.")
+        else:
+            opciones = {f"[{i['id']}] {i['nombre']}": i for i in items_all}
+            sel  = st.selectbox("Ítem", list(opciones.keys()))
+            item = opciones[sel]
+            unidades_item = get_unidades(item["id"])
 
-        confirmar_borrado = st.checkbox(f"Confirmo que quiero borrar '{st.session_state.almacen_nombre}' definitivamente")
+            st.markdown(f"**{len(unidades_item)}** unidad(es) cargada(s) para este ítem.")
+            if unidades_item:
+                for u in sorted(unidades_item, key=lambda x: (x.get("marca") or "", x.get("numero_patrimonio") or "")):
+                    cu1, cu2, cu3 = st.columns([3, 3, 1])
+                    with cu1:
+                        st.markdown(f"<span class='pn-name'>{u.get('marca') or '—'}</span>", unsafe_allow_html=True)
+                    with cu2:
+                        st.markdown(f"<span class='pn-muted'>{u.get('numero_patrimonio') or '—'}</span>", unsafe_allow_html=True)
+                    with cu3:
+                        if st.button("🗑️", key=f"del_unidad_{u['id']}"):
+                            eliminar_unidad(u["id"])
+                            st.session_state.msg = ("ok", "✓ Unidad eliminada.")
+                            st.rerun()
 
-        if st.button("🗑️  Borrar almacén definitivamente", use_container_width=True):
-            if not confirmar_borrado:
-                st.error("Marcá la casilla de confirmación primero.")
-            elif not clave_borrar_1 or not clave_borrar_2:
-                st.error("Completá la contraseña en los dos campos.")
-            elif clave_borrar_1 != clave_borrar_2:
-                st.error("Las dos contraseñas ingresadas no coinciden.")
-            elif not verificar_clave_almacen(ALMACEN_ID, clave_borrar_1):
-                st.error("Contraseña incorrecta.")
-            else:
-                nombre_borrado = st.session_state.almacen_nombre
-                eliminar_almacen(ALMACEN_ID)
-                st.session_state.almacen_id = None
-                st.session_state.almacen_nombre = None
-                st.session_state.autenticado = False
-                st.session_state.msg = ("ok", f"✓ Almacén '{nombre_borrado}' eliminado.")
-                st.rerun()
+            st.markdown("<hr class='pn-divider'>", unsafe_allow_html=True)
+            st.markdown("##### Agregar unidad")
+            c1, c2 = st.columns(2)
+            with c1:
+                marca_nueva = st.text_input("Marca", placeholder="ej: Tektronix")
+            with c2:
+                patrimonio_nuevo = st.text_input("N° de Patrimonio", placeholder="ej: PAT-1001")
+            if st.button("➕  Agregar unidad", use_container_width=True):
+                if not marca_nueva.strip() and not patrimonio_nuevo.strip():
+                    st.error("Completá al menos la marca o el número de patrimonio.")
+                else:
+                    agregar_unidad(item["id"], marca_nueva.strip(), patrimonio_nuevo.strip())
+                    st.session_state.msg = ("ok", "✓ Unidad agregada.")
+                    st.rerun()
 
 # ══════════════════════════════════════════
 # TAB HISTORIAL
@@ -854,7 +713,7 @@ with tab_historial:
             invalidar_cache()
             st.rerun()
 
-    movs = get_movimientos(ALMACEN_ID)
+    movs = get_movimientos()
     if not movs:
         st.info("Aún no hay movimientos registrados.")
     else:

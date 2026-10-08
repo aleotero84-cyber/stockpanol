@@ -213,7 +213,7 @@ def get_config_db():
     """Devuelve (dict de config, migración_ok)."""
     try:
         res = supabase.table("paniol_config").select("clave,valor").execute()
-        supabase.table("paniol_items").select("extras").limit(1).execute()
+        supabase.table("paniol_items").select("extras,prestable").limit(1).execute()
         supabase.table("paniol_columnas").select("id").limit(1).execute()
         supabase.table("paniol_prestamos").select("id").limit(1).execute()
         return {r["clave"]: r["valor"] for r in (res.data or [])}, True
@@ -629,20 +629,35 @@ def personas_conocidas(almacen_id):
     return sorted(nombres.values(), key=str.lower)
 
 
-def prestar_unidad(almacen_id, item, unidad, persona, cuando):
+def prestar(almacen_id, item, persona, cantidad, cuando, unidad=None):
+    """Registra un préstamo de `cantidad` unidades del ítem. `unidad` (opcional) identifica una marca/patrimonio."""
     supabase.table("paniol_prestamos").insert({
-        "almacen_id": almacen_id, "id_item": item["id"], "id_unidad": unidad["id"],
-        "nombre_item": item["nombre"], "marca": unidad.get("marca") or "",
-        "numero_patrimonio": unidad.get("numero_patrimonio") or "",
+        "almacen_id": almacen_id, "id_item": item["id"],
+        "id_unidad": unidad["id"] if unidad else None,
+        "cantidad": 1 if unidad else int(cantidad),
+        "nombre_item": item["nombre"],
+        "marca": (unidad.get("marca") or "") if unidad else "",
+        "numero_patrimonio": (unidad.get("numero_patrimonio") or "") if unidad else "",
         "persona": persona, "prestado_en": cuando.strftime("%Y-%m-%d %H:%M:00"),
     }).execute()
     invalidar_cache()
 
 
-def devolver_prestamo(prestamo_id, cuando):
-    supabase.table("paniol_prestamos").update({
-        "devuelto_en": cuando.strftime("%Y-%m-%d %H:%M:00"),
-    }).eq("id", prestamo_id).execute()
+def devolver_prestamo(prestamo, cantidad, cuando):
+    """Devuelve todo el préstamo o solo una parte (el resto sigue en curso)."""
+    total = int(prestamo.get("cantidad") or 1)
+    fin = cuando.strftime("%Y-%m-%d %H:%M:00")
+    if cantidad >= total:
+        supabase.table("paniol_prestamos").update({"devuelto_en": fin}).eq("id", prestamo["id"]).execute()
+    else:
+        supabase.table("paniol_prestamos").update({"cantidad": total - cantidad}).eq("id", prestamo["id"]).execute()
+        supabase.table("paniol_prestamos").insert({
+            "almacen_id": prestamo["almacen_id"], "id_item": prestamo.get("id_item"),
+            "id_unidad": prestamo.get("id_unidad"), "cantidad": cantidad,
+            "nombre_item": prestamo.get("nombre_item"), "marca": prestamo.get("marca"),
+            "numero_patrimonio": prestamo.get("numero_patrimonio"), "persona": prestamo.get("persona"),
+            "prestado_en": prestamo.get("prestado_en"), "devuelto_en": fin,
+        }).execute()
     invalidar_cache()
 
 
@@ -668,16 +683,9 @@ def agregar_unidad(id_item, marca, numero_patrimonio):
     invalidar_cache()
 
 
-def agregar_unidades(id_item, marca, numero_patrimonio, cantidad):
-    filas = [{"id_item": id_item, "marca": marca, "numero_patrimonio": numero_patrimonio} for _ in range(cantidad)]
-    supabase.table("paniol_unidades").insert(filas).execute()
-    invalidar_cache()
-
-
 def eliminar_unidad(id_unidad):
-    supabase.table("paniol_prestamos").update({
-        "devuelto_en": ahora_ar().strftime("%Y-%m-%d %H:%M:00"),
-    }).eq("id_unidad", id_unidad).is_("devuelto_en", "null").execute()
+    # Los préstamos que la referenciaban quedan como préstamos por cantidad (conservan marca y patrimonio)
+    supabase.table("paniol_prestamos").update({"id_unidad": None}).eq("id_unidad", id_unidad).execute()
     supabase.table("paniol_unidades").delete().eq("id", id_unidad).execute()
     invalidar_cache()
 
@@ -891,16 +899,31 @@ def mostrar_flash():
         st.session_state.msg = None
 
 
+def etiqueta_unidad(u):
+    return f"{u.get('marca') or 'Sin marca'} · {u.get('numero_patrimonio') or 'sin patrimonio'}"
+
+
+def detalle_prestamo(p):
+    partes = [x for x in (p.get("marca"), p.get("numero_patrimonio")) if x]
+    if partes:
+        return " · ".join(partes)
+    cant = int(p.get("cantidad") or 1)
+    return f"×{cant}" if cant > 1 else ""
+
+
 def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
     unidades_por_item = {}
     for u in get_unidades():
         unidades_por_item.setdefault(u["id_item"], []).append(u)
-    unidad_por_id = {u["id"]: u for lista in unidades_por_item.values() for u in lista}
-    prest_por_unidad = {p["id_unidad"]: p for p in get_prestamos_abiertos(almacen_id)
-                        if p["id_unidad"] in unidad_por_id}
+    prest_por_item = {}
+    for p in get_prestamos_abiertos(almacen_id):
+        prest_por_item.setdefault(p["id_item"], []).append(p)
 
-    def prestamos_de(item):
-        return [prest_por_unidad[u["id"]] for u in unidades_por_item.get(item["id"], []) if u["id"] in prest_por_unidad]
+    def es_prestable(i):
+        return bool(i.get("prestable")) or bool(prest_por_item.get(i["id"]))
+
+    def n_prestados(i):
+        return sum(int(p.get("cantidad") or 1) for p in prest_por_item.get(i["id"], []))
 
     if filtro:
         f = filtro.lower()
@@ -910,9 +933,10 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
             partes = [i["nombre"], i.get("categoria"), i.get("subcategoria"), i.get("ubicacion"),
                       i.get("numero_patrimonio"), i.get("descripcion")]
             partes += [fmt_extra(c, extras.get(str(c["id"]))) for c in columnas]
-            partes += [p.get("persona") for p in prestamos_de(i)]
-            partes += [u.get("marca") for u in unidades_por_item.get(i["id"], [])]
-            partes += [u.get("numero_patrimonio") for u in unidades_por_item.get(i["id"], [])]
+            for p in prest_por_item.get(i["id"], []):
+                partes += [p.get("persona"), p.get("marca"), p.get("numero_patrimonio")]
+            for u in unidades_por_item.get(i["id"], []):
+                partes += [u.get("marca"), u.get("numero_patrimonio")]
             return any(f in (str(p) if p else "").lower() for p in partes)
 
         items = [i for i in items if coincide(i)]
@@ -925,28 +949,29 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
         items = sorted(items, key=lambda i: ((i.get("categoria") or "otro"), i["nombre"].lower()))
 
     def resumen_prestamos(item):
-        unidades = unidades_por_item.get(item["id"], [])
-        if not unidades:
+        if not es_prestable(item):
             return '<span class="pn-muted">—</span>'
-        prest = sorted(prestamos_de(item), key=lambda p: str(p.get("prestado_en")))
-        n, k = len(unidades), len(prest)
+        k = n_prestados(item)
+        total = max(int(item["cantidad"]), k)
         if k == 0:
-            head = f'<span class="pn-badge pn-badge-ok">{n} disponible{"s" if n != 1 else ""}</span>'
-        else:
-            clase = "pn-badge-low" if k == n else "pn-badge-loan"
-            head = f'<span class="pn-badge {clase}">{k} de {n} prestado{"s" if k != 1 else ""}</span>'
+            if total == 0:
+                return '<span class="pn-muted">Sin unidades</span>'
+            return f'<span class="pn-badge pn-badge-ok">{total} disponible{"s" if total != 1 else ""}</span>'
+        clase = "pn-badge-low" if k >= total else "pn-badge-loan"
+        head = f'<span class="pn-badge {clase}">{k} de {total} prestado{"s" if k != 1 else ""}</span>'
         lineas = []
-        for p in prest[:3]:
-            u = unidad_por_id.get(p["id_unidad"], {})
-            equipo = u.get("marca") or u.get("numero_patrimonio") or "unidad"
+        abiertos = sorted(prest_por_item.get(item["id"], []), key=lambda p: str(p.get("prestado_en")))
+        for p in abiertos[:3]:
+            det = detalle_prestamo(p)
             d = parse_dt(p.get("prestado_en"))
             cuando = d.strftime("%d/%m %H:%M") if d else "—"
-            lineas.append(f'<div class="pn-loan"><b>{esc(p.get("persona") or "—")}</b> · {esc(equipo)} · {cuando}</div>')
-        if len(prest) > 3:
-            lineas.append(f'<div class="pn-loan">+{len(prest) - 3} más</div>')
+            texto = f'<b>{esc(p.get("persona") or "—")}</b>' + (f" · {esc(det)}" if det else "") + f" · {cuando}"
+            lineas.append(f'<div class="pn-loan">{texto}</div>')
+        if len(abiertos) > 3:
+            lineas.append(f'<div class="pn-loan">+{len(abiertos) - 3} más</div>')
         return head + "".join(lineas)
 
-    hay_unidades = any(unidades_por_item.get(i["id"]) for i in items)
+    hay_prestables = any(es_prestable(i) for i in items)
 
     visible = lambda k: k not in ocultos
 
@@ -958,7 +983,7 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
     if visible("ubicacion"): headers.append("Ubicación")
     if visible("descripcion"): headers.append("Descripción")
     headers += [c["nombre"] for c in columnas]
-    if hay_unidades: headers.append("Equipos y préstamos")
+    if hay_prestables: headers.append("Préstamos")
     headers.append("Estado")
 
     # Agrupar por (categoría, subcategoría) respetando el orden recibido
@@ -987,9 +1012,7 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
                 est = '<span class="pn-badge pn-badge-ok">Disponible</span>'
                 num_cls = "pn-ok"
 
-            nombre_celda = esc(i["nombre"])
-
-            celdas = [f'<td><span class="pn-name">{nombre_celda}</span></td>',
+            celdas = [f'<td><span class="pn-name">{esc(i["nombre"])}</span></td>',
                       f'<td><span class="pn-chip">{esc(i.get("categoria") or "—")}</span></td>']
             if visible("numero_patrimonio"):
                 celdas.append(f'<td><span class="pn-muted">{esc(i.get("numero_patrimonio") or "—")}</span></td>')
@@ -1003,7 +1026,7 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
             extras = i.get("extras") or {}
             for c in columnas:
                 celdas.append(f'<td>{esc(fmt_extra(c, extras.get(str(c["id"]))))}</td>')
-            if hay_unidades:
+            if hay_prestables:
                 celdas.append(f"<td>{resumen_prestamos(i)}</td>")
             celdas.append(f"<td>{est}</td>")
             filas.append("<tr>" + "".join(celdas) + "</tr>")
@@ -1014,28 +1037,26 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
         f'<tbody>{"".join(filas)}</tbody></table></div>',
         unsafe_allow_html=True)
 
-    items_equipos = [i for i in items if unidades_por_item.get(i["id"]) or i.get("categoria") == "equipo"]
-    if items_equipos:
-        st.markdown("<div class='pn-section'>Equipos y préstamos</div>", unsafe_allow_html=True)
+    items_prest = [i for i in items if es_prestable(i)]
+    if items_prest:
+        st.markdown("<div class='pn-section'>Préstamos de equipos</div>", unsafe_allow_html=True)
         puede = st.session_state.autenticado or st.session_state.admin_global
         if puede:
-            st.caption("Abrí un ítem para agregar unidades, prestarlas o registrar devoluciones.")
+            st.caption("Abrí un ítem para prestar unidades o registrar devoluciones. Se usan las unidades que ya cargaste en Cantidad.")
         else:
-            st.caption("Abrí un ítem para ver sus unidades. Para prestar o devolver, ingresá primero en la pestaña Administrar.")
+            st.caption("Abrí un ítem para ver sus préstamos. Para prestar o devolver, ingresá primero en la pestaña Administrar.")
         personas = personas_conocidas(almacen_id)
-        for i in items_equipos:
-            unidades = unidades_por_item.get(i["id"], [])
-            k = len(prestamos_de(i))
-            if unidades:
-                etiqueta = f"{i['nombre']} — {len(unidades)} unidad(es)" + (f" · {k} prestada(s)" if k else "")
-            else:
-                etiqueta = f"{i['nombre']} — sin unidades cargadas"
+        for i in items_prest:
+            k = n_prestados(i)
+            total = max(int(i["cantidad"]), k)
+            etiqueta = f"{i['nombre']} — {k} de {total} prestado(s)" if k else f"{i['nombre']} — {total} disponible(s)"
             with st.expander(etiqueta):
-                ui_prestamos_item(i, unidades, prest_por_unidad, personas, puede, almacen_id)
+                ui_prestamos_item(i, unidades_por_item.get(i["id"], []), prest_por_item.get(i["id"], []),
+                                  personas, puede, almacen_id)
 
 
 # ─────────────────────────────────────────
-# PRÉSTAMOS DE EQUIPOS (por unidad)
+# PRÉSTAMOS DE EQUIPOS (salen de la cantidad ya cargada)
 # ─────────────────────────────────────────
 NUEVA_PERSONA_OPCION = "➕ Otra persona…"
 
@@ -1044,114 +1065,104 @@ def _hora_redondeada(dt, paso=15):
     return dt.time().replace(minute=(dt.minute // paso) * paso, second=0, microsecond=0)
 
 
-def ui_prestamos_item(item, unidades, prest_por_unidad, personas, puede, almacen_id):
+def ui_prestamos_item(item, unidades, prestamos, personas, puede, almacen_id):
     ahora = ahora_ar()
+    k = sum(int(p.get("cantidad") or 1) for p in prestamos)
+    total = max(int(item["cantidad"]), k)
+    disp = max(0, total - k)
 
-    if not unidades:
-        st.caption("Este ítem todavía no tiene unidades cargadas." + (" Agregalas abajo." if puede else ""))
+    st.markdown(f'<div class="pn-loan" style="white-space:normal"><b>Total</b> {total} · '
+                f'<b>Prestados</b> {k} · <b>Disponibles</b> {disp}</div>', unsafe_allow_html=True)
 
-    for u in sorted(unidades, key=lambda x: (x.get("marca") or "", x.get("numero_patrimonio") or "")):
-        uid = u["id"]
-        p = prest_por_unidad.get(uid)
-        estado = ('<span class="pn-badge pn-badge-loan">Prestado</span>' if p
-                  else '<span class="pn-badge pn-badge-ok">Disponible</span>')
+    # ── Prestados ahora ──
+    if prestamos:
+        st.markdown("<div class='pn-section'>Prestados ahora</div>", unsafe_allow_html=True)
+    for p in sorted(prestamos, key=lambda x: str(x.get("prestado_en"))):
+        pid = p["id"]
+        cant = int(p.get("cantidad") or 1)
+        det = detalle_prestamo(p)
         with st.container(border=True):
             st.markdown(
-                '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'
-                f'<div><span class="pn-name">{esc(u.get("marca") or "Sin marca")}</span> '
-                f'<span class="pn-muted">· {esc(u.get("numero_patrimonio") or "sin patrimonio")}</span></div>{estado}</div>',
-                unsafe_allow_html=True)
-
-            if p:
-                st.markdown(f'<div class="pn-loan" style="white-space:normal">Prestado a <b>{esc(p.get("persona") or "—")}</b> '
-                            f'desde el {esc(fmt_dt(p.get("prestado_en")))}</div>', unsafe_allow_html=True)
-                if puede:
-                    c1, c2, c3 = st.columns([2, 2, 2], vertical_alignment="bottom")
-                    with c1:
-                        f_dev = st.date_input("Día de devolución", value=ahora.date(), format="DD/MM/YYYY", key=f"dev_f_{uid}")
-                    with c2:
-                        h_dev = st.time_input("Hora de devolución", value=_hora_redondeada(ahora), step=900, key=f"dev_h_{uid}")
-                    with c3:
-                        if st.button("Registrar devolución", key=f"dev_b_{uid}", type="primary", use_container_width=True):
-                            cuando = datetime.combine(f_dev, h_dev)
-                            inicio = parse_dt(p.get("prestado_en"))
-                            if inicio and cuando < inicio:
-                                st.error("La devolución no puede ser anterior al préstamo.")
-                            else:
-                                devolver_prestamo(p["id"], cuando)
-                                flash("ok", f"✓ Devolución registrada: {u.get('marca') or item['nombre']} ({p.get('persona')}).", toast=True)
-                                st.rerun()
-            elif puede:
-                opciones = personas + [NUEVA_PERSONA_OPCION]
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 2], vertical_alignment="bottom")
+                f'<div class="pn-loan" style="white-space:normal;font-size:14px"><b>{esc(p.get("persona") or "—")}</b>'
+                + (f' · {esc(det)}' if det else '')
+                + f' · desde el {esc(fmt_dt(p.get("prestado_en")))}</div>', unsafe_allow_html=True)
+            if puede:
+                c1, c2, c3, c4 = st.columns([1.3, 2, 2, 2], vertical_alignment="bottom")
                 with c1:
-                    sel = st.selectbox("Prestar a", opciones, index=None, placeholder="Elegí a quién se lo prestás", key=f"pr_p_{uid}")
+                    n_dev = (st.number_input("Cantidad", min_value=1, max_value=cant, value=cant, key=f"dev_c_{pid}")
+                             if cant > 1 else 1)
                 with c2:
-                    f_pre = st.date_input("Día", value=ahora.date(), format="DD/MM/YYYY", key=f"pr_f_{uid}")
+                    f_dev = st.date_input("Día de devolución", value=ahora.date(), format="DD/MM/YYYY", key=f"dev_f_{pid}")
                 with c3:
-                    h_pre = st.time_input("Hora", value=_hora_redondeada(ahora), step=900, key=f"pr_h_{uid}")
-                nueva = ""
-                if sel == NUEVA_PERSONA_OPCION:
-                    nueva = st.text_input("Nombre y apellido de la persona", key=f"pr_n_{uid}")
+                    h_dev = st.time_input("Hora de devolución", value=_hora_redondeada(ahora), step=900, key=f"dev_h_{pid}")
                 with c4:
-                    if st.button("Prestar", key=f"pr_b_{uid}", type="primary", use_container_width=True):
-                        persona = nueva.strip() if sel == NUEVA_PERSONA_OPCION else (sel or "")
-                        if not persona:
-                            st.error("Elegí a quién se lo prestás.")
+                    if st.button("Registrar devolución", key=f"dev_b_{pid}", type="primary", use_container_width=True):
+                        cuando = datetime.combine(f_dev, h_dev)
+                        inicio = parse_dt(p.get("prestado_en"))
+                        if inicio and cuando < inicio:
+                            st.error("La devolución no puede ser anterior al préstamo.")
                         else:
-                            prestar_unidad(almacen_id, item, u, persona, datetime.combine(f_pre, h_pre))
-                            flash("ok", f"✓ {u.get('marca') or item['nombre']} prestado a {persona}.", toast=True)
+                            devolver_prestamo(p, int(n_dev), cuando)
+                            flash("ok", f"✓ Devolución registrada ({p.get('persona')}).", toast=True)
                             st.rerun()
 
-            if puede:
-                if st.button("Quitar unidad", key=f"uq_{uid}", disabled=bool(p),
-                             help="No se puede quitar una unidad que está prestada." if p else None):
-                    eliminar_unidad(uid)
-                    flash("ok", "✓ Unidad eliminada.", toast=True)
-                    st.rerun()
-
+    # ── Prestar ──
     if puede:
-        st.markdown("<div class='pn-section'>Agregar unidades</div>", unsafe_allow_html=True)
-        if st.session_state.pop(f"au_reset_{item['id']}", False):  # limpiar el formulario tras agregar
-            for pref in ("au_m_", "au_p_", "au_c_"):
-                st.session_state.pop(f"{pref}{item['id']}", None)
-        c1, c2, c3, c4 = st.columns([3, 3, 1.4, 2], vertical_alignment="bottom")
-        with c1:
-            marca = st.text_input("Marca", placeholder="ej: Tektronix", key=f"au_m_{item['id']}")
-        with c2:
-            patrimonio = st.text_input("N° de patrimonio", placeholder="ej: PAT-1001", key=f"au_p_{item['id']}")
-        with c3:
-            cantidad = st.number_input("Cantidad", min_value=1, max_value=200, value=1, key=f"au_c_{item['id']}")
-        with c4:
-            if st.button("Agregar", key=f"au_b_{item['id']}", type="primary", use_container_width=True):
-                if not marca.strip() and not patrimonio.strip():
-                    st.error("Completá al menos la marca o el número de patrimonio.")
-                elif cantidad > 1 and patrimonio.strip():
-                    st.error("Para cargar varias unidades a la vez dejá el patrimonio vacío (cada patrimonio es único).")
+        st.markdown("<div class='pn-section'>Prestar</div>", unsafe_allow_html=True)
+        if disp == 0:
+            st.info("No quedan unidades disponibles para prestar.")
+        else:
+            unidades_en_uso = {p.get("id_unidad") for p in prestamos if p.get("id_unidad") is not None}
+            libres = {u["id"]: u for u in unidades if u["id"] not in unidades_en_uso}
+            iid = item["id"]
+            c1, c2, c3, c4 = st.columns([3, 1.3, 2, 2], vertical_alignment="bottom")
+            with c1:
+                sel = st.selectbox("Prestar a", personas + [NUEVA_PERSONA_OPCION], index=None,
+                                   placeholder="Elegí a quién se lo prestás", key=f"pr_p_{iid}")
+            with c2:
+                cantidad = st.number_input("Cantidad", min_value=1, max_value=disp, value=1, key=f"pr_c_{iid}")
+            with c3:
+                f_pre = st.date_input("Día", value=ahora.date(), format="DD/MM/YYYY", key=f"pr_f_{iid}")
+            with c4:
+                h_pre = st.time_input("Hora", value=_hora_redondeada(ahora), step=900, key=f"pr_h_{iid}")
+            nueva = ""
+            if sel == NUEVA_PERSONA_OPCION:
+                nueva = st.text_input("Nombre y apellido de la persona", key=f"pr_n_{iid}")
+            unidad = None
+            if libres:
+                elegida = st.selectbox("Marca o patrimonio específico (opcional)", list(libres), index=None,
+                                       format_func=lambda uid: etiqueta_unidad(libres[uid]),
+                                       placeholder="Dejalo vacío si no importa cuál", key=f"pr_u_{iid}")
+                if elegida is not None:
+                    unidad = libres[elegida]
+                    st.caption("Al elegir una unidad específica se presta de a una.")
+            if st.button("Prestar", key=f"pr_b_{iid}", type="primary", use_container_width=True):
+                persona = nueva.strip() if sel == NUEVA_PERSONA_OPCION else (sel or "")
+                if not persona:
+                    st.error("Elegí a quién se lo prestás.")
                 else:
-                    agregar_unidades(item["id"], marca.strip(), patrimonio.strip(), int(cantidad))
-                    st.session_state[f"au_reset_{item['id']}"] = True
-                    flash("ok", f"✓ {int(cantidad)} unidad(es) agregada(s) a {item['nombre']}.", toast=True)
+                    prestar(almacen_id, item, persona, cantidad, datetime.combine(f_pre, h_pre), unidad)
+                    n = 1 if unidad else int(cantidad)
+                    flash("ok", f"✓ {n} × {item['nombre']} prestado a {persona}.", toast=True)
                     st.rerun()
 
 
 def render_historial_prestamos(prestamos):
     filas = []
     for p in prestamos:
-        equipo = esc(p.get("nombre_item") or "—")
-        if p.get("marca"):
-            equipo += f' <span class="pn-muted">· {esc(p["marca"])}</span>'
+        det = " · ".join(x for x in (p.get("marca"), p.get("numero_patrimonio")) if x)
         devuelto = (esc(fmt_dt(p["devuelto_en"])) if p.get("devuelto_en")
                     else '<span class="pn-badge pn-badge-loan">En préstamo</span>')
         filas.append(
-            f'<tr><td><span class="pn-name">{equipo}</span></td>'
-            f'<td><span class="pn-muted">{esc(p.get("numero_patrimonio") or "—")}</span></td>'
+            f'<tr><td><span class="pn-name">{esc(p.get("nombre_item") or "—")}</span></td>'
+            f'<td><span class="pn-muted">{esc(det or "—")}</span></td>'
+            f'<td><span class="pn-num">{int(p.get("cantidad") or 1)}</span></td>'
             f'<td>{esc(p.get("persona") or "—")}</td>'
             f'<td><span class="pn-muted">{esc(fmt_dt(p.get("prestado_en")))}</span></td>'
             f'<td><span class="pn-muted">{devuelto}</span></td></tr>')
     st.markdown(
         '<div class="pn-table-wrap"><table class="pn-table"><thead><tr>'
-        '<th>Equipo</th><th>N° patrimonio</th><th>Prestado a</th><th>Prestado el</th><th>Devuelto el</th>'
+        '<th>Equipo</th><th>Marca / patrimonio</th><th>Cantidad</th><th>Prestado a</th><th>Prestado el</th><th>Devuelto el</th>'
         f'</tr></thead><tbody>{"".join(filas)}</tbody></table></div>',
         unsafe_allow_html=True)
 
@@ -1584,6 +1595,7 @@ def render_admin(ALM, items_all, columnas, ocultos):
             cantidad = st.number_input("Cantidad inicial", min_value=0, value=0)
             minimo = st.number_input("Stock mínimo de alerta", min_value=0, value=0) if visible("minimo") else 0
             descripcion = st.text_input("Descripción") if visible("descripcion") else ""
+        prestable = st.checkbox("Se puede prestar (habilita el registro de préstamos de este ítem)", key="add_prestable")
         extras_nuevos = formulario_extras(columnas, {}, "add")
 
         if st.button("Guardar ítem", type="primary", use_container_width=True):
@@ -1594,7 +1606,7 @@ def render_admin(ALM, items_all, columnas, ocultos):
                     "nombre": nombre.strip(), "categoria": categoria, "subcategoria": subcategoria,
                     "ubicacion": ubicacion.strip(), "numero_patrimonio": numero_patrimonio.strip(),
                     "cantidad": cantidad, "minimo": minimo, "descripcion": descripcion.strip(),
-                    "extras": combinar_extras({}, extras_nuevos),
+                    "prestable": prestable, "extras": combinar_extras({}, extras_nuevos),
                 })
                 flash("ok", f"✓ '{nombre.strip()}' agregado correctamente.")
                 st.rerun()
@@ -1630,6 +1642,8 @@ def render_admin(ALM, items_all, columnas, ocultos):
                           if visible("minimo") else int(item.get("minimo") or 0))
                 descripcion = (st.text_input("Descripción", value=item.get("descripcion") or "", key=f"edit_desc_{item['id']}")
                                if visible("descripcion") else (item.get("descripcion") or ""))
+            prestable = st.checkbox("Se puede prestar (habilita el registro de préstamos de este ítem)",
+                                    value=bool(item.get("prestable")), key=f"edit_prestable_{item['id']}")
             extras_nuevos = formulario_extras(columnas, item.get("extras") or {}, f"edit_{item['id']}")
 
             if st.button("Guardar cambios", type="primary", use_container_width=True):
@@ -1640,7 +1654,7 @@ def render_admin(ALM, items_all, columnas, ocultos):
                         "nombre": nombre.strip(), "categoria": categoria, "subcategoria": subcategoria,
                         "ubicacion": ubicacion.strip(), "numero_patrimonio": numero_patrimonio.strip(),
                         "cantidad": cantidad, "minimo": minimo, "descripcion": descripcion.strip(),
-                        "extras": combinar_extras(item.get("extras"), extras_nuevos),
+                        "prestable": prestable, "extras": combinar_extras(item.get("extras"), extras_nuevos),
                     })
                     flash("ok", f"✓ '{nombre.strip()}' actualizado.")
                     st.rerun()
@@ -1712,9 +1726,10 @@ def render_admin(ALM, items_all, columnas, ocultos):
     # ── UNIDADES ──────────────────────────
     elif accion == "unidades":
         st.markdown("#### Unidades individuales por ítem")
-        st.caption("Útil para ítems tipo equipo que agrupan varias unidades de distinta marca, cada una con su "
-                   "propio número de patrimonio (ej: Osciloscopio digital → 3 Tektronix, 2 Rigol, 1 Hantek). "
-                   "Es solo informativo y no afecta la cantidad de stock del ítem.")
+        st.caption("Opcional. Sirve para detallar de qué marca es cada equipo y su número de patrimonio "
+                   "(ej: Osciloscopio digital → 3 Tektronix, 2 Rigol). No hace falta para prestar: los préstamos "
+                   "usan la cantidad que ya cargaste. Si detallás unidades, al prestar podés elegir una específica. "
+                   "No modifica la cantidad del ítem.")
         if not items_all:
             st.info("No hay ítems cargados.")
         else:
@@ -1832,11 +1847,12 @@ n_alertas = sum(1 for i in items_all if i["cantidad"] <= (i.get("minimo") or 0))
 n_ok = n_total - n_alertas
 alerta_cls = "warn" if n_alertas else "ok"
 
-_ids_unidades = {u["id"] for u in get_unidades() if u["id_item"] in {i["id"] for i in items_all}}
-n_unidades = len(_ids_unidades)
-n_prestados = sum(1 for p in get_prestamos_abiertos(ALMACEN_ID) if p["id_unidad"] in _ids_unidades)
+_prestables = [i for i in items_all if i.get("prestable")]
+n_prestados = sum(int(p.get("cantidad") or 1) for p in get_prestamos_abiertos(ALMACEN_ID))
+n_prestables = sum(int(i["cantidad"]) for i in _prestables)
 kpi_prestamos = (f'<div class="pn-kpi"><div class="pn-kpi-num">{n_prestados}</div>'
-                 f'<div class="pn-kpi-lbl">Equipos prestados (de {n_unidades})</div></div>' if n_unidades else "")
+                 f'<div class="pn-kpi-lbl">Equipos prestados (de {max(n_prestables, n_prestados)})</div></div>'
+                 if (_prestables or n_prestados) else "")
 
 # ── Encabezado ───────────────────────────
 st.markdown(

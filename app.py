@@ -13,8 +13,9 @@ import hashlib
 import hmac
 import io
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from html import escape as esc
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from PIL import Image
@@ -154,8 +155,39 @@ def procesar_logo(archivo, max_px=480):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def flash(tipo, texto):
-    st.session_state.msg = (tipo, texto)
+try:
+    TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+except Exception:  # si el servidor no tiene base de zonas horarias
+    TZ_AR = timezone(timedelta(hours=-3))
+
+
+def ahora_ar():
+    """Hora actual de Argentina (sin zona), redondeada al minuto."""
+    return datetime.now(TZ_AR).replace(tzinfo=None, second=0, microsecond=0)
+
+
+def parse_dt(v):
+    """Convierte lo que devuelve Supabase ('2026-10-08T14:30:00') a datetime."""
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(str(v).replace("T", " ")[:19])
+    except ValueError:
+        return None
+
+
+def fmt_dt(v):
+    d = parse_dt(v)
+    return d.strftime("%d/%m/%Y %H:%M") if d else "—"
+
+
+def flash(tipo, texto, toast=False):
+    """Mensaje que se muestra tras el próximo rerun. Con toast=True aparece como aviso flotante
+    (útil cuando la persona está más abajo en la página)."""
+    if toast:
+        st.session_state.toast = texto
+    else:
+        st.session_state.msg = (tipo, texto)
 
 
 # ─────────────────────────────────────────
@@ -167,6 +199,7 @@ _defaults = {
     "admin_global": False,    # sesión del administrador general
     "vista": None,            # None | "config"
     "msg": None,              # ("tipo", "texto")
+    "toast": None,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
@@ -182,6 +215,7 @@ def get_config_db():
         res = supabase.table("paniol_config").select("clave,valor").execute()
         supabase.table("paniol_items").select("extras").limit(1).execute()
         supabase.table("paniol_columnas").select("id").limit(1).execute()
+        supabase.table("paniol_prestamos").select("id").limit(1).execute()
         return {r["clave"]: r["valor"] for r in (res.data or [])}, True
     except Exception:
         return {}, False
@@ -354,7 +388,7 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .pn-pill-media img { width: 100%; height: 100%; object-fit: contain; }
 
 /* Indicadores */
-.pn-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.pn-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .pn-kpi { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; padding: 14px 18px; box-shadow: var(--shadow); }
 .pn-kpi.warn { border-left-color: var(--warn); }
 .pn-kpi.ok { border-left-color: var(--ok); }
@@ -381,6 +415,9 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .pn-badge-ok { background: var(--ok-bg); color: var(--ok); }
 .pn-badge-low { background: var(--warn-bg); color: var(--warn); }
 .pn-badge-agotado { background: var(--bad-bg); color: var(--bad); }
+.pn-badge-loan { background: var(--accent-soft); color: var(--accent); }
+.pn-loan { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.35; white-space: nowrap; }
+.pn-loan b { color: var(--text); font-weight: 600; }
 .pn-section { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 0 8px; }
 
 /* Selección de almacén */
@@ -551,11 +588,62 @@ def get_columnas(almacen_id):
         return []
 
 
+@st.cache_data(ttl=10)
+def get_prestamos_abiertos(almacen_id):
+    try:
+        res = (supabase.table("paniol_prestamos").select("*").eq("almacen_id", almacen_id)
+               .is_("devuelto_en", "null").execute())
+        return res.data or []
+    except Exception as e:
+        st.error(f"❌ Error al obtener préstamos: `{type(e).__name__}`")
+        return []
+
+
+@st.cache_data(ttl=10)
+def get_prestamos_historial(almacen_id):
+    try:
+        res = (supabase.table("paniol_prestamos").select("*").eq("almacen_id", almacen_id)
+               .order("prestado_en", desc=True).limit(300).execute())
+        return res.data or []
+    except Exception as e:
+        st.error(f"❌ Error al obtener el historial de préstamos: `{type(e).__name__}`")
+        return []
+
+
 def invalidar_cache():
     get_items.clear()
     get_movimientos.clear()
     get_unidades.clear()
     get_columnas.clear()
+    get_prestamos_abiertos.clear()
+    get_prestamos_historial.clear()
+
+
+def personas_conocidas(almacen_id):
+    """Personas a las que ya se les prestó algo en este almacén (alimenta el menú de selección)."""
+    nombres = {}
+    for p in get_prestamos_abiertos(almacen_id) + get_prestamos_historial(almacen_id):
+        n = (p.get("persona") or "").strip()
+        if n:
+            nombres.setdefault(n.lower(), n)
+    return sorted(nombres.values(), key=str.lower)
+
+
+def prestar_unidad(almacen_id, item, unidad, persona, cuando):
+    supabase.table("paniol_prestamos").insert({
+        "almacen_id": almacen_id, "id_item": item["id"], "id_unidad": unidad["id"],
+        "nombre_item": item["nombre"], "marca": unidad.get("marca") or "",
+        "numero_patrimonio": unidad.get("numero_patrimonio") or "",
+        "persona": persona, "prestado_en": cuando.strftime("%Y-%m-%d %H:%M:00"),
+    }).execute()
+    invalidar_cache()
+
+
+def devolver_prestamo(prestamo_id, cuando):
+    supabase.table("paniol_prestamos").update({
+        "devuelto_en": cuando.strftime("%Y-%m-%d %H:%M:00"),
+    }).eq("id", prestamo_id).execute()
+    invalidar_cache()
 
 
 def agregar_item(almacen_id, datos: dict):
@@ -580,7 +668,16 @@ def agregar_unidad(id_item, marca, numero_patrimonio):
     invalidar_cache()
 
 
+def agregar_unidades(id_item, marca, numero_patrimonio, cantidad):
+    filas = [{"id_item": id_item, "marca": marca, "numero_patrimonio": numero_patrimonio} for _ in range(cantidad)]
+    supabase.table("paniol_unidades").insert(filas).execute()
+    invalidar_cache()
+
+
 def eliminar_unidad(id_unidad):
+    supabase.table("paniol_prestamos").update({
+        "devuelto_en": ahora_ar().strftime("%Y-%m-%d %H:%M:00"),
+    }).eq("id_unidad", id_unidad).is_("devuelto_en", "null").execute()
     supabase.table("paniol_unidades").delete().eq("id", id_unidad).execute()
     invalidar_cache()
 
@@ -794,7 +891,17 @@ def mostrar_flash():
         st.session_state.msg = None
 
 
-def render_tabla(items, columnas, ocultos, filtro=""):
+def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
+    unidades_por_item = {}
+    for u in get_unidades():
+        unidades_por_item.setdefault(u["id_item"], []).append(u)
+    unidad_por_id = {u["id"]: u for lista in unidades_por_item.values() for u in lista}
+    prest_por_unidad = {p["id_unidad"]: p for p in get_prestamos_abiertos(almacen_id)
+                        if p["id_unidad"] in unidad_por_id}
+
+    def prestamos_de(item):
+        return [prest_por_unidad[u["id"]] for u in unidades_por_item.get(item["id"], []) if u["id"] in prest_por_unidad]
+
     if filtro:
         f = filtro.lower()
 
@@ -803,6 +910,9 @@ def render_tabla(items, columnas, ocultos, filtro=""):
             partes = [i["nombre"], i.get("categoria"), i.get("subcategoria"), i.get("ubicacion"),
                       i.get("numero_patrimonio"), i.get("descripcion")]
             partes += [fmt_extra(c, extras.get(str(c["id"]))) for c in columnas]
+            partes += [p.get("persona") for p in prestamos_de(i)]
+            partes += [u.get("marca") for u in unidades_por_item.get(i["id"], [])]
+            partes += [u.get("numero_patrimonio") for u in unidades_por_item.get(i["id"], [])]
             return any(f in (str(p) if p else "").lower() for p in partes)
 
         items = [i for i in items if coincide(i)]
@@ -814,9 +924,29 @@ def render_tabla(items, columnas, ocultos, filtro=""):
     if "subcategoria" in ocultos:
         items = sorted(items, key=lambda i: ((i.get("categoria") or "otro"), i["nombre"].lower()))
 
-    unidades_por_item = {}
-    for u in get_unidades():
-        unidades_por_item.setdefault(u["id_item"], []).append(u)
+    def resumen_prestamos(item):
+        unidades = unidades_por_item.get(item["id"], [])
+        if not unidades:
+            return '<span class="pn-muted">—</span>'
+        prest = sorted(prestamos_de(item), key=lambda p: str(p.get("prestado_en")))
+        n, k = len(unidades), len(prest)
+        if k == 0:
+            head = f'<span class="pn-badge pn-badge-ok">{n} disponible{"s" if n != 1 else ""}</span>'
+        else:
+            clase = "pn-badge-low" if k == n else "pn-badge-loan"
+            head = f'<span class="pn-badge {clase}">{k} de {n} prestado{"s" if k != 1 else ""}</span>'
+        lineas = []
+        for p in prest[:3]:
+            u = unidad_por_id.get(p["id_unidad"], {})
+            equipo = u.get("marca") or u.get("numero_patrimonio") or "unidad"
+            d = parse_dt(p.get("prestado_en"))
+            cuando = d.strftime("%d/%m %H:%M") if d else "—"
+            lineas.append(f'<div class="pn-loan"><b>{esc(p.get("persona") or "—")}</b> · {esc(equipo)} · {cuando}</div>')
+        if len(prest) > 3:
+            lineas.append(f'<div class="pn-loan">+{len(prest) - 3} más</div>')
+        return head + "".join(lineas)
+
+    hay_unidades = any(unidades_por_item.get(i["id"]) for i in items)
 
     visible = lambda k: k not in ocultos
 
@@ -828,6 +958,7 @@ def render_tabla(items, columnas, ocultos, filtro=""):
     if visible("ubicacion"): headers.append("Ubicación")
     if visible("descripcion"): headers.append("Descripción")
     headers += [c["nombre"] for c in columnas]
+    if hay_unidades: headers.append("Equipos y préstamos")
     headers.append("Estado")
 
     # Agrupar por (categoría, subcategoría) respetando el orden recibido
@@ -857,8 +988,6 @@ def render_tabla(items, columnas, ocultos, filtro=""):
                 num_cls = "pn-ok"
 
             nombre_celda = esc(i["nombre"])
-            if unidades_por_item.get(i["id"]):
-                nombre_celda += f" <span class='pn-muted'>· {len(unidades_por_item[i['id']])} unidades</span>"
 
             celdas = [f'<td><span class="pn-name">{nombre_celda}</span></td>',
                       f'<td><span class="pn-chip">{esc(i.get("categoria") or "—")}</span></td>']
@@ -874,6 +1003,8 @@ def render_tabla(items, columnas, ocultos, filtro=""):
             extras = i.get("extras") or {}
             for c in columnas:
                 celdas.append(f'<td>{esc(fmt_extra(c, extras.get(str(c["id"]))))}</td>')
+            if hay_unidades:
+                celdas.append(f"<td>{resumen_prestamos(i)}</td>")
             celdas.append(f"<td>{est}</td>")
             filas.append("<tr>" + "".join(celdas) + "</tr>")
 
@@ -883,22 +1014,146 @@ def render_tabla(items, columnas, ocultos, filtro=""):
         f'<tbody>{"".join(filas)}</tbody></table></div>',
         unsafe_allow_html=True)
 
-    items_con_unidades = [i for i in items if unidades_por_item.get(i["id"])]
-    if items_con_unidades:
-        st.markdown("<div class='pn-section'>Detalle de unidades por marca</div>", unsafe_allow_html=True)
-        for i in items_con_unidades:
-            unidades = sorted(unidades_por_item[i["id"]],
-                              key=lambda u: (u.get("marca") or "", u.get("numero_patrimonio") or ""))
-            with st.expander(f"{i['nombre']} — {len(unidades)} unidad(es)"):
-                filas_u = "".join(
-                    f'<tr><td><span class="pn-name">{esc(u.get("marca") or "—")}</span></td>'
-                    f'<td><span class="pn-muted">{esc(u.get("numero_patrimonio") or "—")}</span></td></tr>'
-                    for u in unidades)
-                st.markdown(
-                    '<div class="pn-table-wrap"><table class="pn-table">'
-                    '<thead><tr><th>Marca</th><th>N° patrimonio</th></tr></thead>'
-                    f'<tbody>{filas_u}</tbody></table></div>',
-                    unsafe_allow_html=True)
+    items_equipos = [i for i in items if unidades_por_item.get(i["id"]) or i.get("categoria") == "equipo"]
+    if items_equipos:
+        st.markdown("<div class='pn-section'>Equipos y préstamos</div>", unsafe_allow_html=True)
+        puede = st.session_state.autenticado or st.session_state.admin_global
+        if puede:
+            st.caption("Abrí un ítem para agregar unidades, prestarlas o registrar devoluciones.")
+        else:
+            st.caption("Abrí un ítem para ver sus unidades. Para prestar o devolver, ingresá primero en la pestaña Administrar.")
+        personas = personas_conocidas(almacen_id)
+        for i in items_equipos:
+            unidades = unidades_por_item.get(i["id"], [])
+            k = len(prestamos_de(i))
+            if unidades:
+                etiqueta = f"{i['nombre']} — {len(unidades)} unidad(es)" + (f" · {k} prestada(s)" if k else "")
+            else:
+                etiqueta = f"{i['nombre']} — sin unidades cargadas"
+            with st.expander(etiqueta):
+                ui_prestamos_item(i, unidades, prest_por_unidad, personas, puede, almacen_id)
+
+
+# ─────────────────────────────────────────
+# PRÉSTAMOS DE EQUIPOS (por unidad)
+# ─────────────────────────────────────────
+NUEVA_PERSONA_OPCION = "➕ Otra persona…"
+
+
+def _hora_redondeada(dt, paso=15):
+    return dt.time().replace(minute=(dt.minute // paso) * paso, second=0, microsecond=0)
+
+
+def ui_prestamos_item(item, unidades, prest_por_unidad, personas, puede, almacen_id):
+    ahora = ahora_ar()
+
+    if not unidades:
+        st.caption("Este ítem todavía no tiene unidades cargadas." + (" Agregalas abajo." if puede else ""))
+
+    for u in sorted(unidades, key=lambda x: (x.get("marca") or "", x.get("numero_patrimonio") or "")):
+        uid = u["id"]
+        p = prest_por_unidad.get(uid)
+        estado = ('<span class="pn-badge pn-badge-loan">Prestado</span>' if p
+                  else '<span class="pn-badge pn-badge-ok">Disponible</span>')
+        with st.container(border=True):
+            st.markdown(
+                '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'
+                f'<div><span class="pn-name">{esc(u.get("marca") or "Sin marca")}</span> '
+                f'<span class="pn-muted">· {esc(u.get("numero_patrimonio") or "sin patrimonio")}</span></div>{estado}</div>',
+                unsafe_allow_html=True)
+
+            if p:
+                st.markdown(f'<div class="pn-loan" style="white-space:normal">Prestado a <b>{esc(p.get("persona") or "—")}</b> '
+                            f'desde el {esc(fmt_dt(p.get("prestado_en")))}</div>', unsafe_allow_html=True)
+                if puede:
+                    c1, c2, c3 = st.columns([2, 2, 2], vertical_alignment="bottom")
+                    with c1:
+                        f_dev = st.date_input("Día de devolución", value=ahora.date(), format="DD/MM/YYYY", key=f"dev_f_{uid}")
+                    with c2:
+                        h_dev = st.time_input("Hora de devolución", value=_hora_redondeada(ahora), step=900, key=f"dev_h_{uid}")
+                    with c3:
+                        if st.button("Registrar devolución", key=f"dev_b_{uid}", type="primary", use_container_width=True):
+                            cuando = datetime.combine(f_dev, h_dev)
+                            inicio = parse_dt(p.get("prestado_en"))
+                            if inicio and cuando < inicio:
+                                st.error("La devolución no puede ser anterior al préstamo.")
+                            else:
+                                devolver_prestamo(p["id"], cuando)
+                                flash("ok", f"✓ Devolución registrada: {u.get('marca') or item['nombre']} ({p.get('persona')}).", toast=True)
+                                st.rerun()
+            elif puede:
+                opciones = personas + [NUEVA_PERSONA_OPCION]
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 2], vertical_alignment="bottom")
+                with c1:
+                    sel = st.selectbox("Prestar a", opciones, index=None, placeholder="Elegí a quién se lo prestás", key=f"pr_p_{uid}")
+                with c2:
+                    f_pre = st.date_input("Día", value=ahora.date(), format="DD/MM/YYYY", key=f"pr_f_{uid}")
+                with c3:
+                    h_pre = st.time_input("Hora", value=_hora_redondeada(ahora), step=900, key=f"pr_h_{uid}")
+                nueva = ""
+                if sel == NUEVA_PERSONA_OPCION:
+                    nueva = st.text_input("Nombre y apellido de la persona", key=f"pr_n_{uid}")
+                with c4:
+                    if st.button("Prestar", key=f"pr_b_{uid}", type="primary", use_container_width=True):
+                        persona = nueva.strip() if sel == NUEVA_PERSONA_OPCION else (sel or "")
+                        if not persona:
+                            st.error("Elegí a quién se lo prestás.")
+                        else:
+                            prestar_unidad(almacen_id, item, u, persona, datetime.combine(f_pre, h_pre))
+                            flash("ok", f"✓ {u.get('marca') or item['nombre']} prestado a {persona}.", toast=True)
+                            st.rerun()
+
+            if puede:
+                if st.button("Quitar unidad", key=f"uq_{uid}", disabled=bool(p),
+                             help="No se puede quitar una unidad que está prestada." if p else None):
+                    eliminar_unidad(uid)
+                    flash("ok", "✓ Unidad eliminada.", toast=True)
+                    st.rerun()
+
+    if puede:
+        st.markdown("<div class='pn-section'>Agregar unidades</div>", unsafe_allow_html=True)
+        if st.session_state.pop(f"au_reset_{item['id']}", False):  # limpiar el formulario tras agregar
+            for pref in ("au_m_", "au_p_", "au_c_"):
+                st.session_state.pop(f"{pref}{item['id']}", None)
+        c1, c2, c3, c4 = st.columns([3, 3, 1.4, 2], vertical_alignment="bottom")
+        with c1:
+            marca = st.text_input("Marca", placeholder="ej: Tektronix", key=f"au_m_{item['id']}")
+        with c2:
+            patrimonio = st.text_input("N° de patrimonio", placeholder="ej: PAT-1001", key=f"au_p_{item['id']}")
+        with c3:
+            cantidad = st.number_input("Cantidad", min_value=1, max_value=200, value=1, key=f"au_c_{item['id']}")
+        with c4:
+            if st.button("Agregar", key=f"au_b_{item['id']}", type="primary", use_container_width=True):
+                if not marca.strip() and not patrimonio.strip():
+                    st.error("Completá al menos la marca o el número de patrimonio.")
+                elif cantidad > 1 and patrimonio.strip():
+                    st.error("Para cargar varias unidades a la vez dejá el patrimonio vacío (cada patrimonio es único).")
+                else:
+                    agregar_unidades(item["id"], marca.strip(), patrimonio.strip(), int(cantidad))
+                    st.session_state[f"au_reset_{item['id']}"] = True
+                    flash("ok", f"✓ {int(cantidad)} unidad(es) agregada(s) a {item['nombre']}.", toast=True)
+                    st.rerun()
+
+
+def render_historial_prestamos(prestamos):
+    filas = []
+    for p in prestamos:
+        equipo = esc(p.get("nombre_item") or "—")
+        if p.get("marca"):
+            equipo += f' <span class="pn-muted">· {esc(p["marca"])}</span>'
+        devuelto = (esc(fmt_dt(p["devuelto_en"])) if p.get("devuelto_en")
+                    else '<span class="pn-badge pn-badge-loan">En préstamo</span>')
+        filas.append(
+            f'<tr><td><span class="pn-name">{equipo}</span></td>'
+            f'<td><span class="pn-muted">{esc(p.get("numero_patrimonio") or "—")}</span></td>'
+            f'<td>{esc(p.get("persona") or "—")}</td>'
+            f'<td><span class="pn-muted">{esc(fmt_dt(p.get("prestado_en")))}</span></td>'
+            f'<td><span class="pn-muted">{devuelto}</span></td></tr>')
+    st.markdown(
+        '<div class="pn-table-wrap"><table class="pn-table"><thead><tr>'
+        '<th>Equipo</th><th>N° patrimonio</th><th>Prestado a</th><th>Prestado el</th><th>Devuelto el</th>'
+        f'</tr></thead><tbody>{"".join(filas)}</tbody></table></div>',
+        unsafe_allow_html=True)
 
 
 def render_historial(movs):
@@ -1548,9 +1803,9 @@ inyectar_css(cfg)
 
 if not _migrado:
     st.error("⚠️ **Falta actualizar la base de datos.**")
-    st.markdown("Ejecutá el archivo `migracion_v2.sql` en **Supabase → SQL Editor** y recargá la página. "
-                "Crea la tabla de configuración y la de columnas personalizadas, y agrega las columnas "
-                "nuevas de logo, configuración y datos adicionales.")
+    st.markdown("Ejecutá los archivos `migracion_v2.sql` y `migracion_v3.sql` (en ese orden) en "
+                "**Supabase → SQL Editor** y recargá la página. Crean la configuración, las columnas "
+                "personalizadas y la tabla de préstamos de equipos. Se pueden volver a ejecutar sin problema.")
     st.stop()
 
 if st.session_state.vista == "config":
@@ -1577,6 +1832,12 @@ n_alertas = sum(1 for i in items_all if i["cantidad"] <= (i.get("minimo") or 0))
 n_ok = n_total - n_alertas
 alerta_cls = "warn" if n_alertas else "ok"
 
+_ids_unidades = {u["id"] for u in get_unidades() if u["id_item"] in {i["id"] for i in items_all}}
+n_unidades = len(_ids_unidades)
+n_prestados = sum(1 for p in get_prestamos_abiertos(ALMACEN_ID) if p["id_unidad"] in _ids_unidades)
+kpi_prestamos = (f'<div class="pn-kpi"><div class="pn-kpi-num">{n_prestados}</div>'
+                 f'<div class="pn-kpi-lbl">Equipos prestados (de {n_unidades})</div></div>' if n_unidades else "")
+
 # ── Encabezado ───────────────────────────
 st.markdown(
     f'<div class="pn-top">{brand_html(cfg)}{pill_almacen(ALM)}</div>'
@@ -1584,6 +1845,7 @@ st.markdown(
     f'<div class="pn-kpi"><div class="pn-kpi-num">{n_total}</div><div class="pn-kpi-lbl">Ítems</div></div>'
     f'<div class="pn-kpi {alerta_cls}"><div class="pn-kpi-num">{n_alertas}</div><div class="pn-kpi-lbl">Con alerta de stock</div></div>'
     f'<div class="pn-kpi ok"><div class="pn-kpi-num">{n_ok}</div><div class="pn-kpi-lbl">Con stock suficiente</div></div>'
+    f'{kpi_prestamos}'
     '</div>',
     unsafe_allow_html=True)
 
@@ -1599,6 +1861,9 @@ with col_ajustes:
         st.rerun()
 
 mostrar_flash()
+if st.session_state.toast:
+    st.toast(st.session_state.toast)
+    st.session_state.toast = None
 
 tab_stock, tab_admin, tab_historial = st.tabs(["Stock", "Administrar", "Historial"])
 
@@ -1614,7 +1879,7 @@ with tab_stock:
             invalidar_cache()
             st.rerun()
 
-    render_tabla(items_all, columnas, ocultos, filtro)
+    render_tabla(items_all, columnas, ocultos, filtro, ALMACEN_ID)
 
     if n_alertas:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1633,9 +1898,19 @@ with tab_historial:
         if st.button("Actualizar ", use_container_width=True):
             invalidar_cache()
             st.rerun()
-    movs = get_movimientos(ALMACEN_ID)
-    if not movs:
-        st.info("Todavía no hay movimientos registrados.")
-    else:
-        st.markdown(f"**{len(movs)}** movimientos registrados.")
-        render_historial(movs)
+    h_stock, h_prest = st.tabs(["Movimientos de stock", "Préstamos de equipos"])
+    with h_stock:
+        movs = get_movimientos(ALMACEN_ID)
+        if not movs:
+            st.info("Todavía no hay movimientos registrados.")
+        else:
+            st.markdown(f"**{len(movs)}** movimientos registrados.")
+            render_historial(movs)
+    with h_prest:
+        prestamos = get_prestamos_historial(ALMACEN_ID)
+        if not prestamos:
+            st.info("Todavía no hay préstamos registrados.")
+        else:
+            en_curso = sum(1 for p in prestamos if not p.get("devuelto_en"))
+            st.markdown(f"**{len(prestamos)}** préstamos registrados, **{en_curso}** en curso.")
+            render_historial_prestamos(prestamos)

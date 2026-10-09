@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import io
 import os
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from html import escape as esc
 from zoneinfo import ZoneInfo
@@ -310,7 +311,7 @@ def _texto_sobre(hex_color):
 
 CSS_BASE = """
 .stApp, [data-testid="stAppViewContainer"] { background: var(--bg) !important; color: var(--text); font-family: var(--font), system-ui, sans-serif; }
-[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stHeader"] { background: var(--bg) !important; }
 #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stAppDeployButton"] { display: none !important; }
 .block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1180px; }
 
@@ -437,8 +438,22 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .pn-row { padding: 2px 0; }
 .pn-cell { min-width: 0; overflow-wrap: anywhere; font-size: 14px; color: var(--text); }
 .pn-cell-lbl { display: none; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 3px; }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { background: var(--surface2) !important; box-shadow: none !important; }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { background: var(--surface2) !important; box-shadow: 0 6px 12px -8px rgba(16, 24, 40, .45) !important; }
+/* Encabezado flotante: queda fijo debajo de la barra superior al bajar por el stock */
+[data-baseweb="tab-panel"], [data-testid="stTabs"] { overflow: visible !important; }
+.st-key-pn_head, [data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { position: sticky !important; top: 3.75rem; z-index: 100; }
+.st-key-pn_head::before { content: ""; position: absolute; left: 0; right: 0; top: -20px; height: 20px; background: var(--bg); }
+/* Botón flotante de búsqueda (redondo, arriba del logo/botón de Streamlit) */
+.st-key-pn_fab { position: fixed !important; right: 22px; bottom: 104px; z-index: 1000; width: auto !important; }
+.st-key-pn_fab button { width: 56px; height: 56px; min-height: 56px; padding: 0 !important; border-radius: 50% !important;
+    background: var(--accent) !important; color: var(--on-accent) !important; border: none !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .28) !important; display: flex; align-items: center; justify-content: center; }
+.st-key-pn_fab button:hover { transform: scale(1.07); filter: brightness(1.08); }
+.st-key-pn_fab_btn button p { display: none !important; }
+.st-key-pn_fab button span, .st-key-pn_fab button [data-testid="stIconMaterial"] { font-size: 28px !important; color: var(--on-accent) !important; }
+div[role="dialog"] { background: var(--bg) !important; color: var(--text); }
 @media (max-width: 900px) {
+    .st-key-pn_head, [data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { display: none !important; }
     .pn-head { display: none; }
     .pn-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important; row-gap: 12px; }
     .pn-cell-lbl { display: block; }
@@ -1039,7 +1054,11 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
 
     # Encabezado de columnas (en un contenedor igual al de las filas, para que alineen)
     encabezado = "".join(f"<div>{esc(h)}</div>" for _, h, _ in cols_def)
-    with st.container(border=True):
+    try:
+        contenedor_head = st.container(border=True, key="pn_head")
+    except TypeError:  # Streamlit antiguo sin key en container
+        contenedor_head = st.container(border=True)
+    with contenedor_head:
         st.markdown(f'<div class="pn-head" style="grid-template-columns:{plantilla}">{encabezado}</div>',
                     unsafe_allow_html=True)
 
@@ -1843,6 +1862,180 @@ def render_admin(ALM, items_all, columnas, ocultos):
                 st.rerun()
 
 
+# ─────────────────────────────────────────
+# BUSCADOR GLOBAL (botón flotante)
+# ─────────────────────────────────────────
+def _norm(t):
+    t = unicodedata.normalize("NFD", str(t or "").lower())
+    return "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+
+
+def buscar_global(consulta, almacenes):
+    """Busca todas las palabras (sin importar tildes ni mayúsculas) en ítems, columnas personalizadas,
+    unidades, préstamos (personas y fechas) y movimientos de los almacenes indicados."""
+    tokens = [t for t in _norm(consulta).split() if t]
+    res = {"items": [], "prestamos": [], "movimientos": []}
+    if not tokens:
+        return res
+
+    def coincide(*partes):
+        texto = _norm(" ".join(str(x) for x in partes if not _vacio(x)))
+        return all(t in texto for t in tokens)
+
+    todas_unidades = get_unidades()
+    for a in almacenes:
+        aid, nom = a["id"], a["nombre"]
+        items, cols = get_items(aid), get_columnas(aid)
+        abiertos = get_prestamos_abiertos(aid)
+        ids = {i["id"] for i in items}
+        unidades = {}
+        for u in todas_unidades:
+            if u["id_item"] in ids:
+                unidades.setdefault(u["id_item"], []).append(u)
+        prest_item = {}
+        for p in abiertos:
+            prest_item.setdefault(p["id_item"], []).append(p)
+
+        for i in items:
+            extras = i.get("extras") or {}
+            datos = [f"{c['nombre']} {fmt_extra(c, extras.get(str(c['id'])))}" for c in cols
+                     if not _vacio(extras.get(str(c["id"])))]
+            partes = [nom, i["nombre"], i.get("categoria"), i.get("subcategoria"), i.get("ubicacion"),
+                      i.get("numero_patrimonio"), i.get("descripcion")] + datos
+            for u in unidades.get(i["id"], []):
+                partes += [u.get("marca"), u.get("numero_patrimonio")]
+            for p in prest_item.get(i["id"], []):
+                partes += [p.get("persona"), fmt_dt(p.get("prestado_en")), "prestado"]
+            if coincide(*partes):
+                res["items"].append((a, i, prest_item.get(i["id"], []), datos))
+
+        vistos = set()
+        for p in abiertos + get_prestamos_historial(aid):
+            if p["id"] in vistos:
+                continue
+            vistos.add(p["id"])
+            estado = "devuelto" if p.get("devuelto_en") else "en prestamo prestado"
+            if coincide(nom, p.get("persona"), p.get("nombre_item"), p.get("marca"), p.get("numero_patrimonio"),
+                        fmt_dt(p.get("prestado_en")), fmt_dt(p.get("devuelto_en")) if p.get("devuelto_en") else "", estado):
+                res["prestamos"].append((a, p))
+
+        for m in get_movimientos(aid):
+            if coincide(nom, m.get("nombre_item"), m.get("tipo"), m.get("responsable"), m.get("fecha")):
+                res["movimientos"].append((a, m))
+    return res
+
+
+def _tabla_html(headers, filas):
+    thead = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    return ('<div class="pn-table-wrap"><table class="pn-table"><thead><tr>' + thead + '</tr></thead><tbody>'
+            + "".join("<tr>" + "".join(f"<td>{c}</td>" for c in fila) + "</tr>" for fila in filas)
+            + "</tbody></table></div>")
+
+
+LIMITE_RESULTADOS = 50
+
+
+@st.dialog("Buscar en todo", width="large")
+def dialogo_busqueda(almacen_id):
+    almacenes = get_almacenes()
+    q = st.text_input("Buscar", placeholder="Nombre, marca, patrimonio, persona, fecha, ubicación, columnas…",
+                      label_visibility="collapsed", key="gs_q")
+    todos = True
+    if almacen_id is not None:
+        alcance = st.radio("Dónde buscar", ["Este almacén", "Todos los almacenes"], horizontal=True, key="gs_alcance")
+        todos = alcance == "Todos los almacenes"
+    objetivo = almacenes if todos else [a for a in almacenes if a["id"] == almacen_id]
+    mostrar_alm = len(objetivo) > 1
+
+    if not q.strip():
+        st.caption("Escribí una o más palabras. Se busca en ítems, columnas personalizadas, marcas y patrimonios, "
+                   "préstamos (personas y fechas) y movimientos. Con varias palabras tienen que aparecer todas.")
+        return
+
+    res = buscar_global(q, objetivo)
+    if not any(res.values()):
+        st.info("Sin resultados. Probá con menos palabras.")
+        return
+
+    def seccion(titulo, lista, headers, armar):
+        if not lista:
+            return
+        st.markdown(f"##### {titulo} ({len(lista)})")
+        st.markdown(_tabla_html(headers, [armar(x) for x in lista[:LIMITE_RESULTADOS]]), unsafe_allow_html=True)
+        if len(lista) > LIMITE_RESULTADOS:
+            st.caption(f"Se muestran los primeros {LIMITE_RESULTADOS}. Agregá palabras para afinar la búsqueda.")
+
+    def fila_item(x):
+        a, i, prest, datos = x
+        k = sum(int(p.get("cantidad") or 1) for p in prest)
+        prest_txt = (f'<span class="pn-badge pn-badge-loan">{k} prestado{"s" if k != 1 else ""}</span> '
+                     f'<span class="pn-muted">{esc(", ".join(sorted({p.get("persona") or "—" for p in prest})))}</span>'
+                     if prest else '<span class="pn-muted">—</span>')
+        fila = []
+        if mostrar_alm:
+            fila.append(f'<span class="pn-muted">{esc(a["nombre"])}</span>')
+        fila += [f'<span class="pn-name">{esc(i["nombre"])}</span>',
+                 f'<span class="pn-chip">{esc(i.get("categoria") or "—")}</span>',
+                 f'<span class="pn-num">{i["cantidad"]}</span>',
+                 f'<span class="pn-muted">{esc(i.get("ubicacion") or "—")}</span>',
+                 f'<span class="pn-muted">{esc(" · ".join(datos)) if datos else "—"}</span>',
+                 prest_txt]
+        return fila
+
+    h_item = (["Almacén"] if mostrar_alm else []) + ["Ítem", "Categoría", "Cantidad", "Ubicación", "Datos adicionales", "Préstamos"]
+    seccion("Ítems", res["items"], h_item, fila_item)
+
+    def fila_prest(x):
+        a, p = x
+        det = " · ".join(v for v in (p.get("marca"), p.get("numero_patrimonio")) if v)
+        dev = (esc(fmt_dt(p["devuelto_en"])) if p.get("devuelto_en")
+               else '<span class="pn-badge pn-badge-loan">En préstamo</span>')
+        fila = []
+        if mostrar_alm:
+            fila.append(f'<span class="pn-muted">{esc(a["nombre"])}</span>')
+        fila += [f'<span class="pn-name">{esc(p.get("nombre_item") or "—")}</span>',
+                 f'<span class="pn-muted">{esc(det or "—")}</span>',
+                 f'<span class="pn-num">{int(p.get("cantidad") or 1)}</span>',
+                 esc(p.get("persona") or "—"),
+                 f'<span class="pn-muted">{esc(fmt_dt(p.get("prestado_en")))}</span>',
+                 f'<span class="pn-muted">{dev}</span>']
+        return fila
+
+    h_prest = (["Almacén"] if mostrar_alm else []) + ["Equipo", "Marca / patrimonio", "Cantidad", "Prestado a", "Prestado el", "Devuelto el"]
+    seccion("Préstamos", res["prestamos"], h_prest, fila_prest)
+
+    def fila_mov(x):
+        a, m = x
+        chip = ('<span class="pn-badge pn-mov-ent">Entrada</span>' if m.get("tipo") == "entrada"
+                else '<span class="pn-badge pn-mov-sal">Salida</span>')
+        fila = []
+        if mostrar_alm:
+            fila.append(f'<span class="pn-muted">{esc(a["nombre"])}</span>')
+        fila += [f'<span class="pn-muted">{esc(str(m.get("fecha") or "")[:16].replace("T", " "))}</span>', chip,
+                 f'<span class="pn-name">{esc(m.get("nombre_item") or "—")}</span>',
+                 f'<span class="pn-num">{m.get("cantidad", "")}</span>',
+                 f'<span class="pn-muted">{esc(m.get("responsable") or "—")}</span>']
+        return fila
+
+    h_mov = (["Almacén"] if mostrar_alm else []) + ["Fecha", "Tipo", "Ítem", "Cantidad", "Responsable"]
+    seccion("Movimientos de stock", res["movimientos"], h_mov, fila_mov)
+
+
+def render_fab(almacen_id):
+    """Botón redondo flotante con lupa que abre el buscador global."""
+    try:
+        cont = st.container(key="pn_fab")
+    except TypeError:  # Streamlit antiguo: sin botón flotante
+        return
+    with cont:
+        try:
+            abrir = st.button("Buscar", icon=":material/search:", key="pn_fab_btn", help="Buscar en todo")
+        except TypeError:
+            abrir = st.button("🔍", key="pn_fab_btn_emoji", help="Buscar en todo")
+    if abrir:
+        dialogo_busqueda(almacen_id)
+
+
 # ══════════════════════════════════════════
 # FLUJO PRINCIPAL
 # ══════════════════════════════════════════
@@ -1863,6 +2056,7 @@ if st.session_state.vista == "config":
 
 if st.session_state.almacen_id is None:
     pantalla_seleccion_almacen(cfg)
+    render_fab(None)
     st.stop()
 
 ALM = almacen_actual()
@@ -1964,3 +2158,5 @@ with tab_historial:
             en_curso = sum(1 for p in prestamos if not p.get("devuelto_en"))
             st.markdown(f"**{len(prestamos)}** préstamos registrados, **{en_curso}** en curso.")
             render_historial_prestamos(prestamos)
+
+render_fab(ALMACEN_ID)

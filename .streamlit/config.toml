@@ -1,0 +1,5 @@
+# Fuerza el tema claro de Streamlit para que los desplegables, calendarios y avisos
+# se vean igual aunque el navegador esté en modo oscuro.
+# Si en Ajustes elegís el tema "Oscuro", cambiá base a "dark".
+[theme]
+base = "light"

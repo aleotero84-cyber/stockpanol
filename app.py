@@ -431,13 +431,18 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .pn-badge-loan { background: var(--accent-soft); color: var(--accent); }
 .pn-loan { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
 .pn-loan b { color: var(--text); font-weight: 600; }
-/* Fila de stock como tarjeta */
-.pn-row { display: flex; flex-wrap: wrap; gap: 14px 30px; align-items: flex-start; padding: 2px 2px 2px; }
-.pn-cell { min-width: 84px; }
-.pn-c-main { flex: 1 1 230px; min-width: 200px; }
-.pn-c-loans { flex: 1 1 280px; }
-.pn-c-state { margin-left: auto; align-self: center; }
-.pn-cell-lbl { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+/* Stock: encabezado y filas con la misma grilla de columnas */
+.pn-head, .pn-row { display: grid; column-gap: 16px; align-items: center; }
+.pn-head { font-size: 12px; font-weight: 600; color: var(--muted); padding: 2px 0; }
+.pn-row { padding: 2px 0; }
+.pn-cell { min-width: 0; overflow-wrap: anywhere; font-size: 14px; color: var(--text); }
+.pn-cell-lbl { display: none; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 3px; }
+[data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { background: var(--surface2) !important; box-shadow: none !important; }
+@media (max-width: 900px) {
+    .pn-head { display: none; }
+    .pn-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important; row-gap: 12px; }
+    .pn-cell-lbl { display: block; }
+}
 .pn-group-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--accent); margin: 20px 0 4px; }
 .pn-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .pn-section { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 0 8px; }
@@ -994,15 +999,49 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
         return head + "".join(lineas)
 
     visible = lambda k: k not in ocultos
+    mostrar_prest = any(es_prestable(i) for i in items)
 
-    def celda(etiqueta, valor_html):
-        return f'<div class="pn-cell"><div class="pn-cell-lbl">{esc(etiqueta)}</div>{valor_html}</div>'
+    # Columnas del stock, siempre todas y en el mismo orden: (clave, encabezado, ancho)
+    cols_def = [("nombre", "Nombre", "minmax(0,2.2fr)"), ("categoria", "Categoría", "minmax(0,1.1fr)")]
+    if visible("numero_patrimonio"): cols_def.append(("patrimonio", "N° patrimonio", "minmax(0,1.1fr)"))
+    cols_def.append(("cantidad", "Cantidad", "minmax(0,.8fr)"))
+    if visible("minimo"): cols_def.append(("minimo", "Mínimo", "minmax(0,.7fr)"))
+    if visible("ubicacion"): cols_def.append(("ubicacion", "Ubicación", "minmax(0,1.1fr)"))
+    if visible("descripcion"): cols_def.append(("descripcion", "Descripción", "minmax(0,1.6fr)"))
+    for c in columnas:
+        cols_def.append((f"x{c['id']}", c["nombre"], "minmax(0,1.1fr)"))
+    if mostrar_prest: cols_def.append(("prestamos", "Préstamos", "minmax(0,2.4fr)"))
+    cols_def.append(("estado", "Estado", "112px"))
+    plantilla = " ".join(w for _, _, w in cols_def)
+
+    def sin_dato(v):
+        return f'<span class="pn-muted">{esc(v) if not _vacio(v) else "—"}</span>'
+
+    def valor_celda(clave, i, est, num_cls):
+        extras = i.get("extras") or {}
+        if clave == "nombre": return f'<span class="pn-name">{esc(i["nombre"])}</span>'
+        if clave == "categoria": return f'<span class="pn-chip">{esc(i.get("categoria") or "—")}</span>'
+        if clave == "patrimonio": return sin_dato(i.get("numero_patrimonio"))
+        if clave == "cantidad": return f'<span class="pn-num {num_cls}">{i["cantidad"]}</span>'
+        if clave == "minimo": return f'<span class="pn-muted">{i.get("minimo") or 0}</span>'
+        if clave == "ubicacion": return sin_dato(i.get("ubicacion"))
+        if clave == "descripcion": return sin_dato(i.get("descripcion"))
+        if clave == "prestamos": return resumen_prestamos(i)
+        if clave == "estado": return est
+        col = next(c for c in columnas if f"x{c['id']}" == clave)
+        return sin_dato(fmt_extra(col, extras.get(str(col["id"]))) if not _vacio(extras.get(str(col["id"]))) else None)
 
     personas = personas_conocidas(almacen_id)
     puede = st.session_state.autenticado or st.session_state.admin_global
 
-    if any(es_prestable(i) for i in items) and not puede:
+    if mostrar_prest and not puede:
         st.caption("Para prestar o registrar devoluciones, ingresá primero en la pestaña Administrar.")
+
+    # Encabezado de columnas (en un contenedor igual al de las filas, para que alineen)
+    encabezado = "".join(f"<div>{esc(h)}</div>" for _, h, _ in cols_def)
+    with st.container(border=True):
+        st.markdown(f'<div class="pn-head" style="grid-template-columns:{plantilla}">{encabezado}</div>',
+                    unsafe_allow_html=True)
 
     # Agrupar por (categoría, subcategoría) respetando el orden recibido
     grupos = []
@@ -1029,30 +1068,14 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
                 est = '<span class="pn-badge pn-badge-ok">Disponible</span>'
                 num_cls = "pn-ok"
 
-            partes = [f'<div class="pn-cell pn-c-main"><div class="pn-name">{esc(i["nombre"])}</div>'
-                      f'<div style="margin-top:5px"><span class="pn-chip">{esc(i.get("categoria") or "—")}</span></div></div>']
-            if visible("numero_patrimonio") and i.get("numero_patrimonio"):
-                partes.append(celda("N° patrimonio", f'<span class="pn-muted">{esc(i["numero_patrimonio"])}</span>'))
-            partes.append(celda("Cantidad", f'<span class="pn-num {num_cls}">{cant}</span>'))
-            if visible("minimo") and mn:
-                partes.append(celda("Mínimo", f'<span class="pn-muted">{mn}</span>'))
-            if visible("ubicacion") and i.get("ubicacion"):
-                partes.append(celda("Ubicación", f'<span class="pn-muted">{esc(i["ubicacion"])}</span>'))
-            if visible("descripcion") and i.get("descripcion"):
-                partes.append(celda("Descripción", f'<span class="pn-muted">{esc(i["descripcion"])}</span>'))
-            extras = i.get("extras") or {}
-            for c in columnas:
-                v = extras.get(str(c["id"]))
-                if not _vacio(v):
-                    partes.append(celda(c["nombre"], f'<span style="font-size:14px">{esc(fmt_extra(c, v))}</span>'))
+            celdas = "".join(
+                f'<div class="pn-cell"><div class="pn-cell-lbl">{esc(h)}</div>{valor_celda(k_, i, est, num_cls)}</div>'
+                for k_, h, _ in cols_def)
             prestable = es_prestable(i)
-            if prestable:
-                partes.append('<div class="pn-cell pn-c-loans"><div class="pn-cell-lbl">Préstamos</div>'
-                              f'{resumen_prestamos(i)}</div>')
-            partes.append(f'<div class="pn-cell pn-c-state">{est}</div>')
 
             with st.container(border=True):
-                st.markdown(f'<div class="pn-row">{"".join(partes)}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="pn-row" style="grid-template-columns:{plantilla}">{celdas}</div>',
+                            unsafe_allow_html=True)
                 if prestable:
                     k = n_prestados(i)
                     total = max(int(cant), k)

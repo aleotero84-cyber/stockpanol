@@ -341,6 +341,19 @@ button, input, textarea { font-family: var(--font), system-ui, sans-serif !impor
 [data-testid="stFileUploaderDropzone"] { background: var(--surface) !important; border: 1px dashed var(--border) !important; border-radius: 10px !important; }
 [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { color: var(--muted) !important; }
 
+[data-testid="stDateInputField"], [data-testid="stTimeInputTimeDisplay"] {
+    background: var(--surface) !important; border: 1px solid var(--border) !important; border-radius: 8px !important;
+}
+[data-testid="stDateInputField"] *, [data-testid="stTimeInputTimeDisplay"] * {
+    color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; background: transparent !important;
+}
+[data-testid="stDateInputField"]:focus-within, [data-testid="stTimeInputTimeDisplay"]:focus-within {
+    border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stExpander"], [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stExpander"] details {
+    background: var(--surface2) !important; border-color: transparent !important;
+}
+
 /* Botones */
 .stButton button, [data-testid^="stBaseButton"] {
     border-radius: 8px !important; font-weight: 600 !important; font-size: 14px !important;
@@ -416,8 +429,17 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .pn-badge-low { background: var(--warn-bg); color: var(--warn); }
 .pn-badge-agotado { background: var(--bad-bg); color: var(--bad); }
 .pn-badge-loan { background: var(--accent-soft); color: var(--accent); }
-.pn-loan { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.35; white-space: nowrap; }
+.pn-loan { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
 .pn-loan b { color: var(--text); font-weight: 600; }
+/* Fila de stock como tarjeta */
+.pn-row { display: flex; flex-wrap: wrap; gap: 14px 30px; align-items: flex-start; padding: 2px 2px 2px; }
+.pn-cell { min-width: 84px; }
+.pn-c-main { flex: 1 1 230px; min-width: 200px; }
+.pn-c-loans { flex: 1 1 280px; }
+.pn-c-state { margin-left: auto; align-self: center; }
+.pn-cell-lbl { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.pn-group-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--accent); margin: 20px 0 4px; }
+.pn-group-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .pn-section { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 0 8px; }
 
 /* Selección de almacén */
@@ -971,20 +993,16 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
             lineas.append(f'<div class="pn-loan">+{len(abiertos) - 3} más</div>')
         return head + "".join(lineas)
 
-    hay_prestables = any(es_prestable(i) for i in items)
-
     visible = lambda k: k not in ocultos
 
-    # Encabezados, en el mismo orden en que se arman las filas
-    headers = ["Nombre", "Categoría"]
-    if visible("numero_patrimonio"): headers.append("N° patrimonio")
-    headers.append("Cantidad")
-    if visible("minimo"): headers.append("Mínimo")
-    if visible("ubicacion"): headers.append("Ubicación")
-    if visible("descripcion"): headers.append("Descripción")
-    headers += [c["nombre"] for c in columnas]
-    if hay_prestables: headers.append("Préstamos")
-    headers.append("Estado")
+    def celda(etiqueta, valor_html):
+        return f'<div class="pn-cell"><div class="pn-cell-lbl">{esc(etiqueta)}</div>{valor_html}</div>'
+
+    personas = personas_conocidas(almacen_id)
+    puede = st.session_state.autenticado or st.session_state.admin_global
+
+    if any(es_prestable(i) for i in items) and not puede:
+        st.caption("Para prestar o registrar devoluciones, ingresá primero en la pestaña Administrar.")
 
     # Agrupar por (categoría, subcategoría) respetando el orden recibido
     grupos = []
@@ -994,10 +1012,9 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
             grupos.append((clave, []))
         grupos[-1][1].append(i)
 
-    filas = []
     for (categoria, subcategoria), items_grupo in grupos:
-        etiqueta = categoria if not subcategoria else f"{categoria} · {subcategoria}"
-        filas.append(f'<tr class="pn-group"><td colspan="{len(headers)}">{esc(etiqueta)}</td></tr>')
+        etiqueta_grupo = categoria if not subcategoria else f"{categoria} · {subcategoria}"
+        st.markdown(f'<div class="pn-group-title">{esc(etiqueta_grupo)}</div>', unsafe_allow_html=True)
 
         for i in items_grupo:
             cant = i["cantidad"]
@@ -1012,47 +1029,38 @@ def render_tabla(items, columnas, ocultos, filtro="", almacen_id=None):
                 est = '<span class="pn-badge pn-badge-ok">Disponible</span>'
                 num_cls = "pn-ok"
 
-            celdas = [f'<td><span class="pn-name">{esc(i["nombre"])}</span></td>',
-                      f'<td><span class="pn-chip">{esc(i.get("categoria") or "—")}</span></td>']
-            if visible("numero_patrimonio"):
-                celdas.append(f'<td><span class="pn-muted">{esc(i.get("numero_patrimonio") or "—")}</span></td>')
-            celdas.append(f'<td><span class="pn-num {num_cls}">{cant}</span></td>')
-            if visible("minimo"):
-                celdas.append(f'<td><span class="pn-muted">{mn}</span></td>')
-            if visible("ubicacion"):
-                celdas.append(f'<td><span class="pn-muted">{esc(i.get("ubicacion") or "—")}</span></td>')
-            if visible("descripcion"):
-                celdas.append(f'<td><span class="pn-muted">{esc(i.get("descripcion") or "—")}</span></td>')
+            partes = [f'<div class="pn-cell pn-c-main"><div class="pn-name">{esc(i["nombre"])}</div>'
+                      f'<div style="margin-top:5px"><span class="pn-chip">{esc(i.get("categoria") or "—")}</span></div></div>']
+            if visible("numero_patrimonio") and i.get("numero_patrimonio"):
+                partes.append(celda("N° patrimonio", f'<span class="pn-muted">{esc(i["numero_patrimonio"])}</span>'))
+            partes.append(celda("Cantidad", f'<span class="pn-num {num_cls}">{cant}</span>'))
+            if visible("minimo") and mn:
+                partes.append(celda("Mínimo", f'<span class="pn-muted">{mn}</span>'))
+            if visible("ubicacion") and i.get("ubicacion"):
+                partes.append(celda("Ubicación", f'<span class="pn-muted">{esc(i["ubicacion"])}</span>'))
+            if visible("descripcion") and i.get("descripcion"):
+                partes.append(celda("Descripción", f'<span class="pn-muted">{esc(i["descripcion"])}</span>'))
             extras = i.get("extras") or {}
             for c in columnas:
-                celdas.append(f'<td>{esc(fmt_extra(c, extras.get(str(c["id"]))))}</td>')
-            if hay_prestables:
-                celdas.append(f"<td>{resumen_prestamos(i)}</td>")
-            celdas.append(f"<td>{est}</td>")
-            filas.append("<tr>" + "".join(celdas) + "</tr>")
+                v = extras.get(str(c["id"]))
+                if not _vacio(v):
+                    partes.append(celda(c["nombre"], f'<span style="font-size:14px">{esc(fmt_extra(c, v))}</span>'))
+            prestable = es_prestable(i)
+            if prestable:
+                partes.append('<div class="pn-cell pn-c-loans"><div class="pn-cell-lbl">Préstamos</div>'
+                              f'{resumen_prestamos(i)}</div>')
+            partes.append(f'<div class="pn-cell pn-c-state">{est}</div>')
 
-    thead = "".join(f"<th>{esc(h)}</th>" for h in headers)
-    st.markdown(
-        f'<div class="pn-table-wrap"><table class="pn-table"><thead><tr>{thead}</tr></thead>'
-        f'<tbody>{"".join(filas)}</tbody></table></div>',
-        unsafe_allow_html=True)
-
-    items_prest = [i for i in items if es_prestable(i)]
-    if items_prest:
-        st.markdown("<div class='pn-section'>Préstamos de equipos</div>", unsafe_allow_html=True)
-        puede = st.session_state.autenticado or st.session_state.admin_global
-        if puede:
-            st.caption("Abrí un ítem para prestar unidades o registrar devoluciones. Se usan las unidades que ya cargaste en Cantidad.")
-        else:
-            st.caption("Abrí un ítem para ver sus préstamos. Para prestar o devolver, ingresá primero en la pestaña Administrar.")
-        personas = personas_conocidas(almacen_id)
-        for i in items_prest:
-            k = n_prestados(i)
-            total = max(int(i["cantidad"]), k)
-            etiqueta = f"{i['nombre']} — {k} de {total} prestado(s)" if k else f"{i['nombre']} — {total} disponible(s)"
-            with st.expander(etiqueta):
-                ui_prestamos_item(i, unidades_por_item.get(i["id"], []), prest_por_item.get(i["id"], []),
-                                  personas, puede, almacen_id)
+            with st.container(border=True):
+                st.markdown(f'<div class="pn-row">{"".join(partes)}</div>', unsafe_allow_html=True)
+                if prestable:
+                    k = n_prestados(i)
+                    total = max(int(cant), k)
+                    etiqueta = (f"Préstamos · {k} de {total} prestado(s)" if k
+                                else f"Préstamos · {total} disponible(s)")
+                    with st.expander(etiqueta):
+                        ui_prestamos_item(i, unidades_por_item.get(i["id"], []), prest_por_item.get(i["id"], []),
+                                          personas, puede, almacen_id)
 
 
 # ─────────────────────────────────────────
@@ -1071,51 +1079,51 @@ def ui_prestamos_item(item, unidades, prestamos, personas, puede, almacen_id):
     total = max(int(item["cantidad"]), k)
     disp = max(0, total - k)
 
-    st.markdown(f'<div class="pn-loan" style="white-space:normal"><b>Total</b> {total} · '
+    st.markdown(f'<div class="pn-loan" style="font-size:13px"><b>Total</b> {total} · '
                 f'<b>Prestados</b> {k} · <b>Disponibles</b> {disp}</div>', unsafe_allow_html=True)
 
-    # ── Prestados ahora ──
-    if prestamos:
-        st.markdown("<div class='pn-section'>Prestados ahora</div>", unsafe_allow_html=True)
+    # ── Prestados ahora: cada préstamo en una sola línea con sus controles ──
     for p in sorted(prestamos, key=lambda x: str(x.get("prestado_en"))):
         pid = p["id"]
         cant = int(p.get("cantidad") or 1)
         det = detalle_prestamo(p)
-        with st.container(border=True):
+        c0, c1, c2, c3, c4 = st.columns([2.6, 1, 1.8, 1.4, 2], vertical_alignment="bottom")
+        with c0:
             st.markdown(
-                f'<div class="pn-loan" style="white-space:normal;font-size:14px"><b>{esc(p.get("persona") or "—")}</b>'
+                f'<div style="font-size:14px;color:var(--text)"><b>{esc(p.get("persona") or "—")}</b>'
                 + (f' · {esc(det)}' if det else '')
-                + f' · desde el {esc(fmt_dt(p.get("prestado_en")))}</div>', unsafe_allow_html=True)
-            if puede:
-                c1, c2, c3, c4 = st.columns([1.3, 2, 2, 2], vertical_alignment="bottom")
-                with c1:
-                    n_dev = (st.number_input("Cantidad", min_value=1, max_value=cant, value=cant, key=f"dev_c_{pid}")
-                             if cant > 1 else 1)
-                with c2:
-                    f_dev = st.date_input("Día de devolución", value=ahora.date(), format="DD/MM/YYYY", key=f"dev_f_{pid}")
-                with c3:
-                    h_dev = st.time_input("Hora de devolución", value=_hora_redondeada(ahora), step=900, key=f"dev_h_{pid}")
-                with c4:
-                    if st.button("Registrar devolución", key=f"dev_b_{pid}", type="primary", use_container_width=True):
-                        cuando = datetime.combine(f_dev, h_dev)
-                        inicio = parse_dt(p.get("prestado_en"))
-                        if inicio and cuando < inicio:
-                            st.error("La devolución no puede ser anterior al préstamo.")
-                        else:
-                            devolver_prestamo(p, int(n_dev), cuando)
-                            flash("ok", f"✓ Devolución registrada ({p.get('persona')}).", toast=True)
-                            st.rerun()
+                + f'<div class="pn-loan">desde el {esc(fmt_dt(p.get("prestado_en")))}</div></div>',
+                unsafe_allow_html=True)
+        if puede:
+            with c1:
+                n_dev = (st.number_input("Cantidad", min_value=1, max_value=cant, value=cant, key=f"dev_c_{pid}")
+                         if cant > 1 else 1)
+            with c2:
+                f_dev = st.date_input("Día de devolución", value=ahora.date(), format="DD/MM/YYYY", key=f"dev_f_{pid}")
+            with c3:
+                h_dev = st.time_input("Hora", value=_hora_redondeada(ahora), step=900, key=f"dev_h_{pid}")
+            with c4:
+                if st.button("Devolver", key=f"dev_b_{pid}", type="primary", use_container_width=True):
+                    cuando = datetime.combine(f_dev, h_dev)
+                    inicio = parse_dt(p.get("prestado_en"))
+                    if inicio and cuando < inicio:
+                        st.error("La devolución no puede ser anterior al préstamo.")
+                    else:
+                        devolver_prestamo(p, int(n_dev), cuando)
+                        flash("ok", f"✓ Devolución registrada ({p.get('persona')}).", toast=True)
+                        st.rerun()
 
     # ── Prestar ──
     if puede:
-        st.markdown("<div class='pn-section'>Prestar</div>", unsafe_allow_html=True)
+        if prestamos:
+            st.markdown("<hr class='pn-divider' style='margin:8px 0'>", unsafe_allow_html=True)
         if disp == 0:
-            st.info("No quedan unidades disponibles para prestar.")
+            st.caption("No quedan unidades disponibles para prestar.")
         else:
             unidades_en_uso = {p.get("id_unidad") for p in prestamos if p.get("id_unidad") is not None}
             libres = {u["id"]: u for u in unidades if u["id"] not in unidades_en_uso}
             iid = item["id"]
-            c1, c2, c3, c4 = st.columns([3, 1.3, 2, 2], vertical_alignment="bottom")
+            c1, c2, c3, c4, c5 = st.columns([2.6, 1, 1.8, 1.4, 2], vertical_alignment="bottom")
             with c1:
                 sel = st.selectbox("Prestar a", personas + [NUEVA_PERSONA_OPCION], index=None,
                                    placeholder="Elegí a quién se lo prestás", key=f"pr_p_{iid}")
@@ -1136,15 +1144,18 @@ def ui_prestamos_item(item, unidades, prestamos, personas, puede, almacen_id):
                 if elegida is not None:
                     unidad = libres[elegida]
                     st.caption("Al elegir una unidad específica se presta de a una.")
-            if st.button("Prestar", key=f"pr_b_{iid}", type="primary", use_container_width=True):
-                persona = nueva.strip() if sel == NUEVA_PERSONA_OPCION else (sel or "")
-                if not persona:
-                    st.error("Elegí a quién se lo prestás.")
-                else:
-                    prestar(almacen_id, item, persona, cantidad, datetime.combine(f_pre, h_pre), unidad)
-                    n = 1 if unidad else int(cantidad)
-                    flash("ok", f"✓ {n} × {item['nombre']} prestado a {persona}.", toast=True)
-                    st.rerun()
+            with c5:
+                if st.button("Prestar", key=f"pr_b_{iid}", type="primary", use_container_width=True):
+                    persona = nueva.strip() if sel == NUEVA_PERSONA_OPCION else (sel or "")
+                    if not persona:
+                        st.error("Elegí a quién se lo prestás.")
+                    else:
+                        prestar(almacen_id, item, persona, cantidad, datetime.combine(f_pre, h_pre), unidad)
+                        n = 1 if unidad else int(cantidad)
+                        flash("ok", f"✓ {n} × {item['nombre']} prestado a {persona}.", toast=True)
+                        st.rerun()
+    elif not prestamos:
+        st.caption("Sin préstamos en curso.")
 
 
 def render_historial_prestamos(prestamos):

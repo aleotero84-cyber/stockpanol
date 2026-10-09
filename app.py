@@ -445,12 +445,17 @@ hr, .pn-divider { border: none; border-top: 1px solid var(--border); margin: 18p
 .st-key-pn_head::before { content: ""; position: absolute; left: 0; right: 0; top: -20px; height: 20px; background: var(--bg); }
 /* Botón flotante de búsqueda (redondo, arriba del logo/botón de Streamlit) */
 .st-key-pn_fab { position: fixed !important; right: 22px; bottom: 104px; z-index: 1000; width: auto !important; }
-.st-key-pn_fab button { width: 56px; height: 56px; min-height: 56px; padding: 0 !important; border-radius: 50% !important;
-    background: var(--accent) !important; color: var(--on-accent) !important; border: none !important;
-    box-shadow: 0 8px 22px rgba(0, 0, 0, .28) !important; display: flex; align-items: center; justify-content: center; }
-.st-key-pn_fab button:hover { transform: scale(1.07); filter: brightness(1.08); }
-.st-key-pn_fab_btn button p { display: none !important; }
-.st-key-pn_fab button span, .st-key-pn_fab button [data-testid="stIconMaterial"] { font-size: 28px !important; color: var(--on-accent) !important; }
+div.st-key-pn_fab .stButton button, div.st-key-pn_fab [data-testid^="stBaseButton"] {
+    width: 56px !important; height: 56px !important; min-height: 56px !important; padding: 0 !important;
+    border-radius: 50% !important; border: none !important;
+    background-color: var(--accent) !important; background-image: var(--fab-icon) !important;
+    background-repeat: no-repeat !important; background-position: center !important; background-size: 28px 28px !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .28) !important; color: transparent !important;
+}
+div.st-key-pn_fab .stButton button:hover, div.st-key-pn_fab [data-testid^="stBaseButton"]:hover {
+    transform: scale(1.07); filter: brightness(1.08); border: none !important;
+}
+div.st-key-pn_fab .stButton button *, div.st-key-pn_fab [data-testid^="stBaseButton"] * { display: none !important; }
 div[role="dialog"] { background: var(--bg) !important; color: var(--text); }
 @media (max-width: 900px) {
     .st-key-pn_head, [data-testid="stVerticalBlockBorderWrapper"]:has(.pn-head) { display: none !important; }
@@ -501,6 +506,11 @@ def inyectar_css(cfg):
         "shadow": t["shadow"], "accent": acento, "accent-soft": acento + "1F",
         "on-accent": _texto_sobre(acento), "font": f"'{fuente}'",
     }
+    trazo = _texto_sobre(acento).replace("#", "%23")
+    variables["fab-icon"] = (
+        'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' '
+        f'stroke=\'{trazo}\' stroke-width=\'2.4\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E'
+        '%3Ccircle cx=\'10.5\' cy=\'10.5\' r=\'6.5\'/%3E%3Cline x1=\'15.5\' y1=\'15.5\' x2=\'21\' y2=\'21\'/%3E%3C/svg%3E")')
     root = ":root{" + ";".join(f"--{k}:{v}" for k, v in variables.items()) + f";color-scheme:{t['scheme']}" + "}"
     st.markdown(f"<style>@import url('{url}');{root}{CSS_BASE}</style>", unsafe_allow_html=True)
 
@@ -2028,10 +2038,7 @@ def render_fab(almacen_id):
     except TypeError:  # Streamlit antiguo: sin botón flotante
         return
     with cont:
-        try:
-            abrir = st.button("Buscar", icon=":material/search:", key="pn_fab_btn", help="Buscar en todo")
-        except TypeError:
-            abrir = st.button("🔍", key="pn_fab_btn_emoji", help="Buscar en todo")
+        abrir = st.button("Buscar", key="pn_fab_btn", help="Buscar en todo")
     if abrir:
         dialogo_busqueda(almacen_id)
 

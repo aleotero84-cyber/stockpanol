@@ -11,7 +11,8 @@ Enlace directo a HOPSIE: agregar  ?modulo=hopsie  a la dirección de la app.
 
 Antes de desplegar:
   1) Pañol  → ejecutar migracion_v2.sql y migracion_v3.sql en el SQL Editor de Supabase.
-  2) HOPSIE → ejecutar hopsie_schema.sql en el SQL Editor de Supabase (crea las tablas hopsie_*).
+  2) HOPSIE → ejecutar hopsie_schema.sql en el SQL Editor de Supabase (crea las tablas hopsie_*)
+     y después hopsie_migracion_clientes.sql (clientes habitué/VIP, cuentas de barra y cuentas sin mesa).
   3) Secrets de Streamlit Cloud:
 
         [supabase]                        # Pañol (anon public)
@@ -2281,6 +2282,7 @@ T_USU, T_LOG, T_CFG = "hopsie_usuarios", "hopsie_log", "hopsie_config"
 T_INS, T_PROD, T_REC = "hopsie_insumos", "hopsie_productos", "hopsie_recetas"
 T_MESAS, T_COM, T_ITEMS = "hopsie_mesas", "hopsie_comandas", "hopsie_items"
 T_PAGOS, T_MOV = "hopsie_pagos", "hopsie_movs"
+T_CLI = "hopsie_clientes"
 
 P_SALON, P_COMANDA, P_COBRO = "🍽️ Salón", "🧾 Comanda", "💳 Cobro"
 P_COCINA, P_ADMIN = "👨‍🍳 Cocina / Barra", "⚙️ Admin"
@@ -2665,6 +2667,243 @@ def cerrar_comanda(com, tot, pagos):
 
 
 # ─────────────────────────────────────────
+# LÓGICA: CUENTAS (mesa · barra · cliente VIP) Y CLIENTES
+# ─────────────────────────────────────────
+TIPOS = {"mesa": "🍽️ Mesa", "barra": "🍻 Barra (de pie)", "cliente": "⭐ Cliente VIP (cuenta personal)"}
+METODOS = ["Efectivo", "QR / Transferencia", "Tarjeta"]
+
+
+def mapa_mesas():
+    return {m["id"]: m for m in listar(T_MESAS)}
+
+
+def mapa_clientes():
+    return {c["id"]: c for c in listar(T_CLI)}
+
+
+def clientes_activos(solo_vip=False):
+    q = tb(T_CLI).select("*").eq("activo", True)
+    if solo_vip:
+        q = q.eq("vip", True)
+    return q.order("nombre").execute().data or []
+
+
+def fmt_cliente(c):
+    if not c:
+        return "— sin cliente registrado —"
+    ap = f" “{c['apodo']}”" if c.get("apodo") else ""
+    tel = f" · {c['telefono']}" if c.get("telefono") else ""
+    return f"{'⭐ ' if c.get('vip') else ''}{c['nombre']}{ap}{tel}"
+
+
+def etiqueta_cuenta(com, mesas_map, cli_map):
+    """Nombre legible de una cuenta, esté o no en una mesa."""
+    tipo = com.get("tipo") or "mesa"
+    m = mesas_map.get(com.get("mesa_id"))
+    cli = cli_map.get(com.get("cliente_id"))
+    if tipo == "cliente":
+        base = "⭐ " + (cli["nombre"] if cli else (com.get("etiqueta") or "Cliente"))
+        return base + (f" · {m['nombre']}" if m else "")
+    if tipo == "barra":
+        return "🍻 Barra · " + (com.get("etiqueta") or "sin nombre")
+    if m:
+        return m["nombre"]
+    return "Cuenta sin mesa" if not com.get("mesa_id") else "Mesa no disponible"
+
+
+def cuenta_vip_abierta(cliente_id):
+    r = (tb(T_COM).select("*").eq("estado", "abierta").eq("cliente_id", cliente_id)
+         .eq("tipo", "cliente").limit(1).execute().data)
+    return r[0] if r else None
+
+
+def registrar_cliente(nombre, telefono="", vip=False, descuento=0.0):
+    """Busca por teléfono / nombre y, si no existe, lo da de alta en la base de clientes."""
+    nombre, telefono = nombre.strip(), telefono.strip()
+    if not nombre:
+        return None
+    if telefono:
+        ex = listar(T_CLI, telefono=telefono)
+        if ex:
+            return ex[0]
+    else:
+        ex = [c for c in listar(T_CLI) if c["nombre"].strip().lower() == nombre.lower()]
+        if ex:
+            return ex[0]
+    r = insertar(T_CLI, {"nombre": nombre, "telefono": telefono, "vip": bool(vip),
+                         "descuento_pct": float(descuento or 0), "alta_por": actor()})[0]
+    log("cliente_creado", f"{nombre} · {telefono or 's/tel'}{' · VIP' if vip else ''}")
+    return r
+
+
+def campos_cliente(pref, solo_vip=False, vip_default=False):
+    """Selector de cliente + alta rápida. Se usa dentro de un st.form. Devuelve (sel, nuevo, tel, vip_nuevo)."""
+    lista = clientes_activos(solo_vip)
+    sel = st.selectbox("Cliente habitué" if solo_vip else "Cliente registrado (opcional)",
+                       [None] + lista, format_func=fmt_cliente, key=f"{pref}_cli")
+    st.caption("¿Cliente nuevo? Cargalo acá y queda guardado en la base de clientes.")
+    a, b, c = st.columns([3, 2, 2])
+    nuevo = a.text_input("Nombre (cliente nuevo)", key=f"{pref}_nn")
+    tel = b.text_input("Teléfono", key=f"{pref}_nt")
+    vipn = c.checkbox("Habitué VIP", value=vip_default, key=f"{pref}_nv")
+    return sel, nuevo, tel, vipn
+
+
+def resolver_cliente(sel, nuevo, tel, vip_nuevo):
+    if sel:
+        return sel
+    if nuevo and nuevo.strip():
+        return registrar_cliente(nuevo, tel or "", vip_nuevo)
+    return None
+
+
+def abrir_cuenta(tipo, mesa_id=None, comensales=1, mozo="", cliente=None, etiqueta=""):
+    """Abre una cuenta. Si el cliente es habitué se le abre SU cuenta personal (o se retoma la que ya tenía)."""
+    if cliente and cliente.get("vip"):
+        tipo, etiqueta = "cliente", cliente["nombre"]
+        ya = cuenta_vip_abierta(cliente["id"])
+        if ya:
+            if mesa_id and not ya.get("mesa_id"):
+                actualizar(T_COM, ya["id"], {"mesa_id": mesa_id})
+                log("cuenta_mesa_asignada", f"comanda {ya['id']} · {cliente['nombre']} → mesa {mesa_id}")
+            st.toast(f"⭐ {cliente['nombre']} ya tenía cuenta abierta: la retomo.")
+            return ya
+    r = insertar(T_COM, {
+        "mesa_id": mesa_id, "tipo": tipo, "etiqueta": (etiqueta or "").strip(),
+        "cliente_id": cliente["id"] if cliente else None, "comensales": int(comensales), "mozo": (mozo or "").strip(),
+        "propina_pct": cfg_num("propina_default", 0),
+        "descuento_pct": float(cliente.get("descuento_pct") or 0) if cliente else 0,
+        "abierta_por": actor()})[0]
+    log("mesa_abierta" if tipo == "mesa" else "cuenta_abierta",
+        f"{tipo} · {etiqueta or mesa_id} · comanda {r['id']}")
+    return r
+
+
+def _igual(a, b):
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return (a or "") == (b or "")
+
+
+def recalcular_comanda(cid):
+    """Si la cuenta ya está cobrada, actualiza total y medios de pago tras una corrección."""
+    com = uno(T_COM, cid)
+    if com and com["estado"] == "pagada":
+        tot = totales(com, items_de([cid]))
+        mets = ", ".join(sorted({p["metodo"] for p in listar(T_PAGOS, comanda_id=cid)}))
+        actualizar(T_COM, cid, {"total": tot["total"], "metodo_pago": mets})
+
+
+def editar_item(it, cant=None, precio=None, nota=None, nombre=None, tocar_stock=True):
+    cambios, partes = {}, []
+    if cant is not None and int(cant) != int(it["cantidad"]):
+        delta = int(cant) - int(it["cantidad"])
+        cambios["cantidad"] = int(cant)
+        partes.append(f"cantidad {it['cantidad']} → {int(cant)}")
+        if tocar_stock:
+            aplicar_receta(it["producto_id"], delta, it["comanda_id"], f"Edición comanda #{it['comanda_id']}")
+    if precio is not None and not _igual(precio, it["precio_unit"]):
+        cambios["precio_unit"] = float(precio)
+        partes.append(f"precio {peso(it['precio_unit'])} → {peso(precio)}")
+    if nota is not None and (nota or "") != (it.get("nota") or ""):
+        cambios["nota"] = nota
+        partes.append("nota")
+    if nombre is not None and nombre.strip() and nombre.strip() != it["nombre"]:
+        cambios["nombre"] = nombre.strip()
+        partes.append(f"nombre → {nombre.strip()}")
+    if cambios:
+        actualizar(T_ITEMS, it["id"], cambios)
+        log("item_editado", f"comanda {it['comanda_id']} · {it['nombre']} · " + ", ".join(partes))
+    return bool(cambios)
+
+
+def set_anulado(it, anular, estado_comanda):
+    """Anula / restaura un ítem. En comandas canceladas el stock ya fue devuelto, así que no se toca."""
+    actualizar(T_ITEMS, it["id"], {"anulado": bool(anular)})
+    if estado_comanda != "cancelada":
+        aplicar_receta(it["producto_id"], -it["cantidad"] if anular else it["cantidad"], it["comanda_id"],
+                       ("Anulación" if anular else "Restauración") + f" comanda #{it['comanda_id']}")
+    log("item_anulado" if anular else "item_restaurado", f"comanda {it['comanda_id']} · {it['cantidad']}× {it['nombre']}")
+
+
+def form_datos_cuenta(com, key, importes=True):
+    """Edita los datos de una cuenta: tipo, mesa, cliente, nombre, comensales, mozo, descuento, propina, nota."""
+    cid = com["id"]
+    abierta = com["estado"] == "abierta"
+    mesas_all = listar(T_MESAS, order="orden")
+    otras = ({c["mesa_id"] for c in listar(T_COM, estado="abierta") if c["id"] != cid and c.get("mesa_id")}
+             if abierta else set())
+    mesas_ok = [m for m in mesas_all if m["id"] not in otras and (not abierta or m["activa"] or m["id"] == com.get("mesa_id"))]
+    op_mesa = [None] + mesas_ok
+    idx_m = next((i for i, m in enumerate(op_mesa) if m and m["id"] == com.get("mesa_id")), 0)
+    clientes = clientes_activos()
+    if com.get("cliente_id") and not any(c["id"] == com["cliente_id"] for c in clientes):
+        cur = uno(T_CLI, com["cliente_id"])
+        if cur:
+            clientes.append(cur)
+    op_cli = [None] + clientes
+    idx_c = next((i for i, c in enumerate(op_cli) if c and c["id"] == com.get("cliente_id")), 0)
+    tipos = list(TIPOS)
+    if com.get("mesa_id") and com["mesa_id"] not in {m["id"] for m in mesas_all}:
+        st.warning("Esta cuenta apunta a una mesa que ya no existe. Elegí una mesa válida o pasala a barra / VIP.")
+    elif abierta and com.get("mesa_id") and com["mesa_id"] not in {m["id"] for m in mesas_all if m["activa"]}:
+        st.warning("Esta cuenta está en una mesa desactivada (por eso el salón la cuenta como ocupada). Podés moverla acá.")
+    with st.form(f"edc_{key}"):
+        tipo = st.selectbox("Tipo de cuenta", tipos, index=tipos.index(com.get("tipo") or "mesa"), format_func=TIPOS.get)
+        a, b = st.columns(2)
+        mesa = a.selectbox("Mesa", op_mesa, index=idx_m,
+                           format_func=lambda m: "— sin mesa —" if m is None else f"{m['nombre']} ({m['zona']})")
+        cli = b.selectbox("Cliente", op_cli, index=idx_c, format_func=fmt_cliente)
+        etiqueta = st.text_input("Nombre / referencia (para barra o cuentas sin mesa)", value=com.get("etiqueta") or "")
+        cols = st.columns(4 if importes else 2)
+        comen = cols[0].number_input("Comensales", 1, 60, int(com["comensales"] or 1))
+        mozo = cols[1].text_input("Adicionista / mozo", value=com.get("mozo") or "")
+        desc, prop = float(com.get("descuento_pct") or 0), float(com.get("propina_pct") or 0)
+        if importes:
+            desc = cols[2].number_input("Descuento %", 0.0, 100.0, desc, 5.0)
+            prop = cols[3].number_input("Propina %", 0.0, 100.0, prop, 5.0)
+        nota = st.text_input("Nota", value=com.get("nota") or "")
+        ok = st.form_submit_button("💾 Guardar cambios", type="primary")
+    if not ok:
+        return
+    if tipo == "mesa" and mesa is None:
+        st.error("Una cuenta de mesa necesita una mesa.")
+        return
+    if tipo == "cliente":
+        if cli is None:
+            st.error("Una cuenta VIP necesita un cliente.")
+            return
+        ya = cuenta_vip_abierta(cli["id"])
+        if abierta and ya and ya["id"] != cid:
+            st.error(f"{cli['nombre']} ya tiene otra cuenta VIP abierta (#{ya['id']}).")
+            return
+        if not etiqueta.strip():
+            etiqueta = cli["nombre"]
+    nuevo = {"tipo": tipo, "mesa_id": mesa["id"] if (mesa and tipo != "barra") else None,
+             "cliente_id": cli["id"] if cli else None, "etiqueta": etiqueta.strip(), "comensales": int(comen),
+             "mozo": mozo.strip(), "nota": nota.strip(), "descuento_pct": desc, "propina_pct": prop}
+    cambios = {k: v for k, v in nuevo.items() if not _igual(com.get(k), v)}
+    if not cambios:
+        st.info("No hay cambios para guardar.")
+        return
+    actualizar(T_COM, cid, nuevo)
+    mm = {m["id"]: m["nombre"] for m in mesas_all}
+    det = []
+    for k, v in cambios.items():
+        if k == "mesa_id":
+            det.append(f"mesa {mm.get(com.get('mesa_id'), '—')} → {mm.get(v, '—')}")
+        elif k == "cliente_id":
+            det.append("cliente cambiado")
+        else:
+            det.append(f"{k} {com.get(k)!s} → {v!s}")
+    log("cuenta_editada", f"comanda {cid} · " + "; ".join(det))
+    recalcular_comanda(cid)
+    st.toast("Cuenta actualizada ✅")
+    st.rerun()
+
+
+# ─────────────────────────────────────────
 # TICKET / PRE-CUENTA
 # ─────────────────────────────────────────
 def ticket_html(com, mesa, items, tot):
@@ -2706,22 +2945,162 @@ def ticket_txt(com, mesa, items, tot):
 # ─────────────────────────────────────────
 # PÁGINA: SALÓN
 # ─────────────────────────────────────────
+def html_cuenta(titulo, com, tot, cli=None):
+    mins = int((ahora_utc() - parse_ts(com["abierta_ts"])).total_seconds() // 60)
+    quien = f"{'⭐' if cli.get('vip') else '👤'} {esc(cli['nombre'])} · " if cli else ""
+    return (f'<div class="mesa ocupada"><div class="mn">{esc(titulo)}</div>'
+            f'<div class="mt">{peso(tot["total"])}</div>'
+            f'<div class="ms">{quien}👥 {com["comensales"]} · ⏱ {mins}′ · {esc(com.get("mozo") or "—")}</div></div>')
+
+
+def grilla_cuentas(lista, por_com, mesas_map, clis, pref, motivos=None, boton="Ver / pedir"):
+    cols = st.columns(4)
+    for idx, c in enumerate(lista):
+        with cols[idx % 4]:
+            st.markdown(html_cuenta(etiqueta_cuenta(c, mesas_map, clis), c, totales(c, por_com[c["id"]])),
+                        unsafe_allow_html=True)
+            if motivos:
+                st.caption(f"⚠️ {motivos[c['id']]}")
+            if st.button(boton, key=f"{pref}_{c['id']}", **STRETCH):
+                st.session_state["cid"] = c["id"]
+                go(P_COMANDA)
+
+
+def _ir_a_cuenta(c):
+    st.session_state["cid"] = c["id"]
+    for k in ("mesa_pend", "nueva_cuenta"):
+        st.session_state.pop(k, None)
+    go(P_COMANDA)
+
+
+def form_abrir_mesa(mesas, ocupa):
+    mp = st.session_state.get("mesa_pend")
+    if not mp:
+        return
+    mesa = next((m for m in mesas if m["id"] == mp), None)
+    if not mesa or mp in ocupa:
+        st.session_state.pop("mesa_pend", None)
+        return
+    st.markdown(f"#### Abrir {mesa['nombre']}")
+    u = usuario_actual()
+    with st.form("abrir_mesa"):
+        c1, c2 = st.columns(2)
+        n = c1.number_input("Comensales", 1, 60, 2)
+        mozo = c2.text_input("Adicionista / mozo", value=(u["nombre"] if u else ""))
+        sel, nuevo, tel, vipn = campos_cliente("am")
+        ok = st.form_submit_button("Abrir y tomar pedido", type="primary")
+    if st.button("Cancelar", key="am_cancel"):
+        st.session_state.pop("mesa_pend", None)
+        st.rerun()
+    if ok:
+        cli = resolver_cliente(sel, nuevo, tel, vipn)
+        r = abrir_cuenta("mesa", mesa_id=mp, comensales=n, mozo=mozo, cliente=cli)
+        _ir_a_cuenta(r)
+
+
+def form_cuenta_barra():
+    st.markdown("#### 🍻 Atender en barra (sin mesa)")
+    u = usuario_actual()
+    with st.form("cuenta_barra"):
+        c1, c2, c3 = st.columns([3, 1, 2])
+        nombre = c1.text_input("Nombre o referencia (ej. “Juan”, “camisa roja”)")
+        n = c2.number_input("Personas", 1, 30, 1)
+        mozo = c3.text_input("Adicionista / mozo", value=(u["nombre"] if u else ""))
+        sel, nuevo, tel, vipn = campos_cliente("ab")
+        ok = st.form_submit_button("Abrir cuenta de barra", type="primary")
+    if st.button("Cancelar", key="ab_cancel"):
+        st.session_state.pop("nueva_cuenta", None)
+        st.rerun()
+    if ok:
+        cli = resolver_cliente(sel, nuevo, tel, vipn)
+        etiqueta = nombre.strip() or (cli["nombre"] if cli else f"Barra {datetime.now(TZ).strftime('%H:%M')}")
+        r = abrir_cuenta("barra", comensales=n, mozo=mozo, cliente=cli, etiqueta=etiqueta)
+        _ir_a_cuenta(r)
+
+
+def form_cuenta_vip(mesas, ocupa):
+    st.markdown("#### ⭐ Abrir cuenta VIP (habitué)")
+    u = usuario_actual()
+    libres = [None] + [m for m in mesas if m["id"] not in ocupa]
+    with st.form("cuenta_vip"):
+        sel, nuevo, tel, vipn = campos_cliente("av", solo_vip=True, vip_default=True)
+        c1, c2, c3 = st.columns([3, 1, 2])
+        mesa = c1.selectbox("Sentado en mesa (opcional)", libres,
+                            format_func=lambda m: "— sin mesa, cuenta personal —" if m is None else f"{m['nombre']} ({m['zona']})")
+        n = c2.number_input("Personas", 1, 60, 1)
+        mozo = c3.text_input("Adicionista / mozo", value=(u["nombre"] if u else ""))
+        ok = st.form_submit_button("Abrir cuenta VIP", type="primary")
+    if st.button("Cancelar", key="av_cancel"):
+        st.session_state.pop("nueva_cuenta", None)
+        st.rerun()
+    if ok:
+        cli = resolver_cliente(sel, nuevo, tel, vipn)
+        if not cli:
+            st.error("Elegí un cliente habitué o cargá uno nuevo.")
+            return
+        if not cli.get("vip"):
+            actualizar(T_CLI, cli["id"], {"vip": True})
+            cli["vip"] = True
+            log("cliente_vip", f"{cli['nombre']} pasó a habitué")
+        r = abrir_cuenta("cliente", mesa_id=mesa["id"] if mesa else None, comensales=n, mozo=mozo, cliente=cli)
+        _ir_a_cuenta(r)
+
+
 def pagina_salon():
     mesas = listar(T_MESAS, order="orden", activa=True)
+    abiertas = sorted(listar(T_COM, estado="abierta"), key=lambda c: c["id"])
+    por_com = defaultdict(list)
+    for it in items_de([c["id"] for c in abiertas]):
+        por_com[it["comanda_id"]].append(it)
+    clis = mapa_clientes()
+    mesas_map = {m["id"]: m for m in mesas}
+
+    # Cada cuenta abierta va a UN solo lugar: su mesa, la lista VIP, la barra o "para revisar".
+    ocupa, vip, barra, revisar = {}, [], [], []
+    motivos = {}
+    for c in abiertas:
+        tipo, mid = c.get("tipo") or "mesa", c.get("mesa_id")
+        if mid in mesas_map:
+            if mid in ocupa:
+                revisar.append(c)
+                motivos[c["id"]] = "Hay otra cuenta abierta en la misma mesa."
+            else:
+                ocupa[mid] = c
+        elif tipo == "cliente":
+            vip.append(c)
+        elif tipo == "barra":
+            barra.append(c)
+        else:
+            revisar.append(c)
+            motivos[c["id"]] = "Sin mesa asignada." if not mid else "Su mesa está desactivada o ya no existe."
+
+    en_curso = sum(totales(c, por_com[c["id"]])["total"] for c in abiertas)
+    a, b, c_, d = st.columns(4)
+    a.metric("Mesas ocupadas", f"{len(ocupa)} / {len(mesas)}")
+    b.metric("Mesas libres", len(mesas) - len(ocupa))
+    c_.metric("Barra / VIP", len(vip) + len(barra))
+    d.metric("Consumo en curso", peso(en_curso))
+    if revisar:
+        st.warning(f"Hay {len(revisar)} cuenta(s) abierta(s) que no corresponden a una mesa activa: "
+                   f"están más abajo en **Cuentas para revisar**. Corregilas o anulalas desde ahí.")
+
+    b1, b2, _ = st.columns([2, 2, 4])
+    if b1.button("🍻 Atender en barra", key="btn_barra", **STRETCH):
+        st.session_state["nueva_cuenta"] = "barra"
+        st.session_state.pop("mesa_pend", None)
+    if b2.button("⭐ Cuenta VIP", key="btn_vip", **STRETCH):
+        st.session_state["nueva_cuenta"] = "vip"
+        st.session_state.pop("mesa_pend", None)
+
+    form_abrir_mesa(mesas, ocupa)
+    nc = st.session_state.get("nueva_cuenta")
+    if nc == "barra":
+        form_cuenta_barra()
+    elif nc == "vip":
+        form_cuenta_vip(mesas, ocupa)
+
     if not mesas:
         st.info("Todavía no hay mesas. Cargalas en **Admin → Mesas** (o usá los datos de ejemplo en Admin → Dashboard).")
-        return
-    abiertas = {c["mesa_id"]: c for c in listar(T_COM, estado="abierta")}
-    por_com = defaultdict(list)
-    for it in items_de([c["id"] for c in abiertas.values()]):
-        por_com[it["comanda_id"]].append(it)
-
-    en_mesas = sum(totales(c, por_com[c["id"]])["total"] for c in abiertas.values())
-    a, b, c_ = st.columns(3)
-    a.metric("Mesas ocupadas", f"{len(abiertas)} / {len(mesas)}")
-    b.metric("Mesas libres", len(mesas) - len(abiertas))
-    c_.metric("Consumo en curso", peso(en_mesas))
-
     zonas = []
     for m in mesas:
         if m["zona"] not in zonas:
@@ -2731,16 +3110,11 @@ def pagina_salon():
         lista = [m for m in mesas if m["zona"] == zona]
         cols = st.columns(4)
         for idx, m in enumerate(lista):
-            com = abiertas.get(m["id"])
+            com = ocupa.get(m["id"])
             with cols[idx % 4]:
                 if com:
-                    tot = totales(com, por_com[com["id"]])
-                    mins = int((ahora_utc() - parse_ts(com["abierta_ts"])).total_seconds() // 60)
-                    st.markdown(
-                        f'<div class="mesa ocupada"><div class="mn">{esc(m["nombre"])}</div>'
-                        f'<div class="mt">{peso(tot["total"])}</div>'
-                        f'<div class="ms">👥 {com["comensales"]} · ⏱ {mins}′ · {esc(com.get("mozo") or "—")}</div></div>',
-                        unsafe_allow_html=True)
+                    st.markdown(html_cuenta(m["nombre"], com, totales(com, por_com[com["id"]]),
+                                            cli=clis.get(com.get("cliente_id"))), unsafe_allow_html=True)
                     if st.button("Ver / pedir", key=f"mesa_{m['id']}", **STRETCH):
                         st.session_state["cid"] = com["id"]
                         go(P_COMANDA)
@@ -2751,35 +3125,36 @@ def pagina_salon():
                         unsafe_allow_html=True)
                     if st.button("Abrir mesa", key=f"mesa_{m['id']}", **STRETCH):
                         st.session_state["mesa_pend"] = m["id"]
+                        st.session_state.pop("nueva_cuenta", None)
+                        st.rerun()
 
-    mp = st.session_state.get("mesa_pend")
-    if mp and mp not in abiertas:
-        mesa = next((m for m in mesas if m["id"] == mp), None)
-        if mesa:
-            st.markdown(f"#### Abrir {mesa['nombre']}")
-            u = usuario_actual()
-            with st.form("abrir_mesa"):
-                c1, c2 = st.columns(2)
-                n = c1.number_input("Comensales", 1, 60, 2)
-                mozo = c2.text_input("Adicionista / mozo", value=(u["nombre"] if u else ""))
-                if st.form_submit_button("Abrir y tomar pedido", type="primary"):
-                    r = insertar(T_COM, {"mesa_id": mp, "comensales": int(n), "mozo": mozo.strip(),
-                                         "propina_pct": cfg_num("propina_default", 0), "abierta_por": actor()})[0]
-                    log("mesa_abierta", f"{mesa['nombre']} · comanda {r['id']}")
-                    st.session_state["cid"] = r["id"]
-                    st.session_state.pop("mesa_pend", None)
-                    go(P_COMANDA)
+    if vip:
+        st.markdown("### ⭐ Cuentas VIP")
+        grilla_cuentas(vip, por_com, mesas_map, clis, "vip")
+    if barra:
+        st.markdown("### 🍻 Barra")
+        grilla_cuentas(barra, por_com, mesas_map, clis, "barra")
+    if revisar:
+        st.markdown("### ⚠️ Cuentas para revisar")
+        grilla_cuentas(revisar, por_com, mesas_map, clis, "rev", motivos, "Ver / corregir")
 
 
 # ─────────────────────────────────────────
 # PÁGINA: COMANDA
 # ─────────────────────────────────────────
 def comanda_actual():
+    """Devuelve (comanda, 'mesa'). Si la cuenta no está en una mesa (barra / VIP / mesa borrada),
+    'mesa' es un dict equivalente con el nombre de la cuenta, así el resto de la pantalla funciona igual."""
     cid = st.session_state.get("cid")
     com = uno(T_COM, cid) if cid else None
     if not com or com["estado"] != "abierta":
         return None, None
-    return com, uno(T_MESAS, com["mesa_id"])
+    mesas = mapa_mesas()
+    cli = uno(T_CLI, com["cliente_id"]) if com.get("cliente_id") else None
+    nombre = etiqueta_cuenta(com, mesas, {cli["id"]: cli} if cli else {})
+    m = mesas.get(com.get("mesa_id"))
+    return com, {"id": m["id"] if m else None, "nombre": nombre, "zona": m["zona"] if m else "—",
+                 "capacidad": m["capacidad"] if m else com["comensales"]}
 
 
 def grilla_productos(lista, com, pref):
@@ -2794,13 +3169,19 @@ def grilla_productos(lista, com, pref):
 def pagina_comanda():
     com, mesa = comanda_actual()
     if not com:
-        st.info("Elegí una mesa en **Salón** para tomar el pedido.")
+        st.info("Elegí una mesa o una cuenta en **Salón** para tomar el pedido.")
         if st.button("Ir al salón"):
             go(P_SALON)
         return
     cid = com["id"]
     st.markdown(f"### 🧾 {mesa['nombre']}")
     st.caption(f"Abierta {hop_fmt_dt(com['abierta_ts'])} · 👥 {com['comensales']} · Adicionista: {com.get('mozo') or '—'} · Comanda #{cid}")
+    cli = uno(T_CLI, com["cliente_id"]) if com.get("cliente_id") else None
+    if cli:
+        st.caption(f"{'⭐ Habitué' if cli['vip'] else '👤 Cliente'}: **{cli['nombre']}**"
+                   + (f" · 📞 {cli['telefono']}" if cli.get("telefono") else "")
+                   + (f" · Dto. {float(cli['descuento_pct']):g}%" if float(cli.get("descuento_pct") or 0) else "")
+                   + (f" · 📝 {cli['notas']}" if cli.get("notas") else ""))
 
     izq, der = st.columns([3, 2], gap="large")
 
@@ -2837,10 +3218,12 @@ def pagina_comanda():
             if c3.button("➕", key=f"mas{it['id']}"):
                 sumar_cantidad(it, 1)
                 st.rerun()
-            with c4.popover("📝"):
+            with c4.popover("✏️"):
+                nq = st.number_input("Cantidad", 1, 999, int(it["cantidad"]), key=f"eq{it['id']}")
+                npz = st.number_input("Precio unitario", 0.0, 10_000_000.0, float(it["precio_unit"]), 100.0, key=f"ep{it['id']}")
                 nv = st.text_input("Nota para cocina/barra", value=it["nota"], key=f"nt{it['id']}")
-                if st.button("Guardar nota", key=f"gn{it['id']}"):
-                    actualizar(T_ITEMS, it["id"], {"nota": nv.strip()})
+                if st.button("Guardar", key=f"gn{it['id']}"):
+                    editar_item(it, nq, npz, nv.strip())
                     st.rerun()
             if c5.button("🗑️", key=f"del{it['id']}"):
                 anular_item(it)
@@ -2875,17 +3258,8 @@ def pagina_comanda():
             st.download_button("⬇ Descargar .txt", ticket_txt(com, mesa, activos, tot),
                                file_name=f"precuenta_{mesa['nombre'].replace(' ', '_')}.txt")
 
-        with st.expander("🔀 Cambiar de mesa"):
-            ocupadas = {c["mesa_id"] for c in listar(T_COM, estado="abierta")}
-            libres = [m for m in listar(T_MESAS, order="orden", activa=True) if m["id"] not in ocupadas]
-            if libres:
-                dest = st.selectbox("Pasar a", libres, format_func=lambda m: f"{m['nombre']} ({m['zona']})", key=f"cm{cid}")
-                if st.button("Mover", key=f"mv{cid}"):
-                    actualizar(T_COM, cid, {"mesa_id": dest["id"]})
-                    log("mesa_cambiada", f"comanda {cid}: {mesa['nombre']} → {dest['nombre']}")
-                    st.rerun()
-            else:
-                st.caption("No hay mesas libres.")
+        with st.expander("✏️ Editar cuenta (mesa, cliente, datos)"):
+            form_datos_cuenta(com, f"c{cid}", importes=False)
 
         with st.expander("❌ Anular comanda"):
             motivo = st.text_input("Motivo", key=f"mt{cid}")
@@ -3039,7 +3413,7 @@ def _cocina_body():
     if not abiertas:
         st.info("Sin comandas abiertas.")
         return
-    mesas = {m["id"]: m for m in listar(T_MESAS)}
+    mesas, clis = mapa_mesas(), mapa_clientes()
     its = [i for i in items_de(list(abiertas)) if i["estado"] in ("pendiente", "preparando")]
     cols = st.columns(2)
     for col, sec in zip(cols, ["Cocina", "Barra"]):
@@ -3049,11 +3423,11 @@ def _cocina_body():
             if not lista:
                 st.caption("Todo al día 🎉")
             for it in lista:
-                mesa = mesas.get(abiertas[it["comanda_id"]]["mesa_id"], {"nombre": "?"})
+                nom = etiqueta_cuenta(abiertas[it["comanda_id"]], mesas, clis)
                 mins = int((ahora_utc() - parse_ts(it["ts"])).total_seconds() // 60)
                 nota = f"<br>📝 {esc(it['nota'])}" if it["nota"] else ""
                 st.markdown(
-                    f"<div class='kds {it['estado']}'><b>{esc(mesa['nombre'])}</b> · {it['cantidad']}× {esc(it['nombre'])}"
+                    f"<div class='kds {it['estado']}'><b>{esc(nom)}</b> · {it['cantidad']}× {esc(it['nombre'])}"
                     f" <small>({mins}′)</small>{nota}</div>", unsafe_allow_html=True)
                 b1, b2 = st.columns(2)
                 if it["estado"] == "pendiente" and b1.button("🔥 Preparar", key=f"pr{it['id']}"):
@@ -3162,9 +3536,9 @@ def admin_dashboard():
     ventas = sum(float(c["total"]) for c in pagadas)
     a, b, c, d = st.columns(4)
     a.metric("Ventas de hoy", peso(ventas))
-    b.metric("Mesas cobradas", len(pagadas))
+    b.metric("Cuentas cobradas", len(pagadas))
     c.metric("Ticket promedio", peso(ventas / len(pagadas)) if pagadas else "—")
-    d.metric("Mesas abiertas", len(listar(T_COM, estado="abierta")))
+    d.metric("Cuentas abiertas", len(listar(T_COM, estado="abierta")))
 
     rows = (tb(T_COM).select("total,cerrada_ts").eq("estado", "pagada")
             .gte("cerrada_ts", iso(inicio_dia_utc(6))).execute().data or [])
@@ -3354,11 +3728,28 @@ def admin_mesas():
             except Exception:
                 st.error("Ya existe una mesa con ese nombre.")
     if mesas:
-        m = st.selectbox("Activar / desactivar", mesas, format_func=lambda x: f"{x['nombre']} ({'activa' if x['activa'] else 'inactiva'})")
-        if st.button("Cambiar estado"):
-            actualizar(T_MESAS, m["id"], {"activa": not m["activa"]})
-            log("mesa_estado", f"{m['nombre']} → {'inactiva' if m['activa'] else 'activa'}")
-            st.rerun()
+        m = st.selectbox("Editar / activar / desactivar", mesas, format_func=lambda x: f"{x['nombre']} ({'activa' if x['activa'] else 'inactiva'})")
+        with st.form(f"em{m['id']}"):
+            c1, c2, c3 = st.columns(3)
+            nn = c1.text_input("Nombre", m["nombre"])
+            zz = c2.text_input("Zona", m["zona"])
+            cp = c3.number_input("Capacidad", 1, 40, int(m["capacidad"]))
+            if st.form_submit_button("Guardar mesa") and nn.strip():
+                try:
+                    actualizar(T_MESAS, m["id"], {"nombre": nn.strip(), "zona": zz.strip() or "Salón", "capacidad": int(cp)})
+                    log("mesa_editada", f"{m['nombre']} → {nn.strip()} · {zz.strip()} · cap. {cp}")
+                    st.rerun()
+                except Exception:
+                    st.error("Ya existe una mesa con ese nombre.")
+        if st.button("Desactivar mesa" if m["activa"] else "Activar mesa"):
+            abierta = [c for c in listar(T_COM, estado="abierta") if c.get("mesa_id") == m["id"]]
+            if m["activa"] and abierta:
+                st.error(f"No se puede desactivar: {m['nombre']} tiene una cuenta abierta (#{abierta[0]['id']}). "
+                         f"Cobrala, anulala o pasala a otra mesa desde Admin → Operaciones.")
+            else:
+                actualizar(T_MESAS, m["id"], {"activa": not m["activa"]})
+                log("mesa_estado", f"{m['nombre']} → {'inactiva' if m['activa'] else 'activa'}")
+                st.rerun()
 
 
 def admin_pagos():
@@ -3483,6 +3874,296 @@ def admin_apariencia():
         st.rerun()
 
 
+def admin_operaciones():
+    st.caption("Corregí cualquier operación del sistema: cuentas abiertas, cobradas o canceladas. "
+               "Todo cambio queda registrado en Auditoría con usuario y hora.")
+    f1, f2, f3 = st.columns([2, 2, 3])
+    est = f1.selectbox("Estado", ["Todas", "Abiertas", "Cobradas", "Canceladas"], key="op_est")
+    per = f2.selectbox("Período", ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Todo"], index=2, key="op_per")
+    busca = f3.text_input("Buscar", placeholder="🔎 cuenta, cliente, mozo o #", key="op_q").strip().lower()
+
+    q = tb(T_COM).select("*")
+    if est != "Todas":
+        q = q.eq("estado", {"Abiertas": "abierta", "Cobradas": "pagada", "Canceladas": "cancelada"}[est])
+    if est != "Abiertas":  # las abiertas se muestran siempre, sin importar la fecha
+        dias = {"Hoy": 0, "Ayer": 1, "Últimos 7 días": 6, "Últimos 30 días": 29}.get(per)
+        if dias is not None:
+            q = q.gte("abierta_ts", iso(inicio_dia_utc(dias)))
+        if per == "Ayer":
+            q = q.lt("abierta_ts", iso(inicio_dia_utc(0)))
+    coms = q.order("id", desc=True).limit(300).execute().data or []
+    if est == "Todas":
+        vistos = {c["id"] for c in coms}
+        coms += [c for c in listar(T_COM, estado="abierta") if c["id"] not in vistos]
+        coms.sort(key=lambda c: c["id"], reverse=True)
+
+    mesas_map, cli_map = mapa_mesas(), mapa_clientes()
+    ids_ab = [c["id"] for c in coms if c["estado"] == "abierta"]
+    por_com = defaultdict(list)
+    for it in items_de(ids_ab):
+        por_com[it["comanda_id"]].append(it)
+
+    def total_de(c):
+        return totales(c, por_com[c["id"]])["total"] if c["estado"] == "abierta" else float(c.get("total") or 0)
+
+    ESTADO = {"abierta": "🟢 Abierta", "pagada": "✅ Cobrada", "cancelada": "❌ Cancelada"}
+    filas = []
+    for c in coms:
+        nombre = etiqueta_cuenta(c, mesas_map, cli_map)
+        cli = cli_map.get(c.get("cliente_id"))
+        if busca and busca not in f"{c['id']} {nombre} {(cli or {}).get('nombre', '')} {c.get('mozo') or ''}".lower():
+            continue
+        filas.append({"#": c["id"], "Cuenta": nombre, "Cliente": cli["nombre"] if cli else "",
+                      "Estado": ESTADO.get(c["estado"], c["estado"]), "Abierta": hop_fmt_dt(c["abierta_ts"]),
+                      "Cerrada": hop_fmt_dt(c.get("cerrada_ts")), "Mozo": c.get("mozo") or "",
+                      "Total": peso(total_de(c)), "Medios": c.get("metodo_pago") or ""})
+    if not filas:
+        st.info("No hay operaciones con esos filtros.")
+        return
+    st.dataframe(pd.DataFrame(filas), hide_index=True, **STRETCH)
+
+    desc = {f["#"]: f"#{f['#']} · {f['Cuenta']} · {f['Estado']} · {f['Abierta']} · {f['Total']}" for f in filas}
+    cid = st.selectbox("Operación a corregir", list(desc), format_func=desc.get, key="op_sel")
+    com = uno(T_COM, cid)
+    if not com:
+        return
+    items_act = items_de([cid])
+    tot = totales(com, items_act)
+    pagos = listar(T_PAGOS, comanda_id=cid, order="id")
+    pagado = round(sum(float(p["monto"]) for p in pagos))
+    st.markdown(f"#### {etiqueta_cuenta(com, mesas_map, cli_map)} · #{cid}")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Estado", ESTADO.get(com["estado"], com["estado"]))
+    m2.metric("Total de la cuenta", peso(tot["total"]))
+    m3.metric("Cobrado", peso(pagado))
+    m4.metric("Diferencia", peso(tot["total"] - pagado))
+    if com["estado"] == "pagada" and tot["total"] != pagado:
+        st.warning("Lo cobrado no coincide con el total de la cuenta. Ajustá los cobros en la pestaña **Pagos**.")
+
+    t_datos, t_cons, t_pagos, t_estado = st.tabs(["📝 Datos", "🍺 Consumo", "💵 Pagos", "🔁 Estado"])
+
+    with t_datos:
+        form_datos_cuenta(com, f"op{cid}", importes=True)
+
+    with t_cons:
+        todos = listar(T_ITEMS, comanda_id=cid, order="id")
+        tocar = com["estado"] != "cancelada"
+        if not todos:
+            st.caption("Esta cuenta no tiene consumos.")
+        for it in todos:
+            sub = float(it["precio_unit"]) * it["cantidad"]
+            with st.expander(f"{'🚫 ' if it['anulado'] else ''}{it['cantidad']}× {it['nombre']} · {peso(sub)}"):
+                with st.form(f"opi{it['id']}"):
+                    a, b, c = st.columns([3, 1, 2])
+                    nn = a.text_input("Descripción", it["nombre"])
+                    nq = b.number_input("Cantidad", 1, 999, int(it["cantidad"]))
+                    npz = c.number_input("Precio unitario", 0.0, 10_000_000.0, float(it["precio_unit"]), 100.0)
+                    nt = st.text_input("Nota", it.get("nota") or "")
+                    if st.form_submit_button("Guardar ítem"):
+                        if editar_item(it, nq, npz, nt.strip(), nn, tocar_stock=tocar and not it["anulado"]):
+                            recalcular_comanda(cid)
+                        st.rerun()
+                if it["anulado"]:
+                    if st.button("↩️ Restaurar ítem", key=f"ors{it['id']}"):
+                        set_anulado(it, False, com["estado"])
+                        recalcular_comanda(cid)
+                        st.rerun()
+                elif st.button("🗑️ Anular ítem", key=f"oan{it['id']}"):
+                    set_anulado(it, True, com["estado"])
+                    recalcular_comanda(cid)
+                    st.rerun()
+        prods = listar(T_PROD, order="nombre", activo=True)
+        if prods:
+            st.markdown("**Agregar producto a esta cuenta**")
+            with st.form(f"opadd{cid}"):
+                a, b = st.columns([4, 1])
+                p = a.selectbox("Producto", prods, format_func=lambda x: f"{x['nombre']} · {peso(x['precio'])}")
+                n = b.number_input("Cant.", 1, 99, 1)
+                if st.form_submit_button("Agregar"):
+                    insertar(T_ITEMS, {"comanda_id": cid, "producto_id": p["id"], "nombre": p["nombre"],
+                                       "sector": p["sector"], "precio_unit": float(p["precio"]), "cantidad": int(n),
+                                       "estado": "pendiente" if com["estado"] == "abierta" else "servido",
+                                       "cargado_por": actor()})
+                    if tocar:
+                        aplicar_receta(p["id"], int(n), cid, f"Corrección comanda #{cid}")
+                    log("item_agregado", f"comanda {cid} · {n}× {p['nombre']} (desde Operaciones)")
+                    recalcular_comanda(cid)
+                    st.rerun()
+
+    with t_pagos:
+        if not pagos:
+            st.caption("Esta cuenta no tiene cobros registrados.")
+        for p in pagos:
+            with st.expander(f"{p['metodo']}{' · ' + p['proveedor'] if p.get('proveedor') else ''} · "
+                             f"{peso(p['monto'])} · {hop_fmt_dt(p['ts'])}"):
+                with st.form(f"opp{p['id']}"):
+                    a, b, c = st.columns([2, 2, 2])
+                    met = a.selectbox("Medio", METODOS, index=METODOS.index(p["metodo"]) if p["metodo"] in METODOS else 0)
+                    prov = b.text_input("Proveedor (Mercado Pago, banco…)", p.get("proveedor") or "")
+                    mon = c.number_input("Monto", 0.0, 100_000_000.0, float(p["monto"]), 100.0)
+                    ref = st.text_input("Referencia / cupón", p.get("referencia") or "")
+                    if st.form_submit_button("Guardar cobro"):
+                        actualizar(T_PAGOS, p["id"], {"metodo": met, "proveedor": prov.strip() or None,
+                                                      "monto": mon, "referencia": ref.strip()})
+                        log("pago_editado", f"comanda {cid} · {p['metodo']} {peso(p['monto'])} → {met} {peso(mon)}")
+                        recalcular_comanda(cid)
+                        st.rerun()
+                if st.button("🗑️ Eliminar cobro", key=f"opd{p['id']}"):
+                    borrar(T_PAGOS, p["id"])
+                    log("pago_eliminado", f"comanda {cid} · {p['metodo']} {peso(p['monto'])}")
+                    recalcular_comanda(cid)
+                    st.rerun()
+        st.markdown("**Registrar un cobro**")
+        with st.form(f"opnp{cid}"):
+            a, b, c = st.columns(3)
+            met = a.selectbox("Medio", METODOS)
+            prov = b.text_input("Proveedor (opcional)")
+            mon = c.number_input("Monto", 0.0, 100_000_000.0, float(max(0, tot["total"] - pagado)), 100.0)
+            ref = st.text_input("Referencia (opcional)")
+            if st.form_submit_button("Agregar cobro") and mon > 0:
+                insertar(T_PAGOS, {"comanda_id": cid, "metodo": met, "proveedor": prov.strip() or None,
+                                   "monto": mon, "usuario": actor(), "referencia": ref.strip()})
+                log("pago_agregado", f"comanda {cid} · {met} {peso(mon)} (desde Operaciones)")
+                recalcular_comanda(cid)
+                st.rerun()
+
+    with t_estado:
+        st.markdown(f"Estado actual: **{ESTADO.get(com['estado'], com['estado'])}**")
+        if com["estado"] == "abierta":
+            if tot["total"] > 0 and pagado >= tot["total"]:
+                if st.button("✅ Cerrar como cobrada", type="primary", key=f"ocl{cid}"):
+                    cerrar_comanda(com, tot, pagos)
+                    st.rerun()
+            else:
+                st.caption("Para cerrarla como cobrada, el total cobrado tiene que cubrir la cuenta (pestaña Pagos).")
+            motivo = st.text_input("Motivo de la anulación", key=f"omo{cid}")
+            ok = st.checkbox("Confirmo que se anula toda la cuenta (el stock se devuelve)", key=f"ook{cid}")
+            if st.button("❌ Anular cuenta", disabled=not (ok and motivo.strip()), key=f"oan_c{cid}"):
+                anular_comanda(com, motivo.strip())
+                st.rerun()
+        else:
+            st.caption("Reabrir deja la cuenta de nuevo en el salón para seguir cargando consumos. "
+                       "Los cobros registrados se mantienen: corregilos en la pestaña Pagos si hace falta.")
+            if st.button("↩️ Reabrir cuenta", type="primary", key=f"ore{cid}"):
+                tipo, mid = com.get("tipo") or "mesa", com.get("mesa_id")
+                choque = [c for c in listar(T_COM, estado="abierta") if c["id"] != cid and (
+                    (mid and c.get("mesa_id") == mid) or
+                    (tipo == "cliente" and com.get("cliente_id") and c.get("cliente_id") == com["cliente_id"]
+                     and (c.get("tipo") == "cliente"))) ]
+                if choque:
+                    st.error(f"No se puede reabrir: ya hay una cuenta abierta en el mismo lugar (#{choque[0]['id']}). "
+                             f"Cerrala o cambiale la mesa primero.")
+                else:
+                    if com["estado"] == "cancelada":
+                        for it in items_de([cid]):
+                            aplicar_receta(it["producto_id"], it["cantidad"], cid, f"Reapertura comanda #{cid}")
+                    actualizar(T_COM, cid, {"estado": "abierta", "cerrada_ts": None, "total": 0, "metodo_pago": ""})
+                    log("comanda_reabierta", f"comanda {cid} (estaba {com['estado']})")
+                    st.session_state["cid"] = cid
+                    st.toast("Cuenta reabierta ✅")
+                    st.rerun()
+
+
+def cuentas_con_cliente():
+    out, ini = [], 0
+    while True:
+        r = (tb(T_COM).select("id,cliente_id,total,estado,abierta_ts,cerrada_ts").gt("cliente_id", 0)
+             .order("id").range(ini, ini + 999).execute().data or [])
+        out += r
+        if len(r) < 1000:
+            return out
+        ini += 1000
+
+
+def admin_clientes():
+    st.caption("Base de clientes. Se completa sola cuando asignás mesa o abrís una cuenta, y desde acá la ordenás. "
+               "Los **habitué (VIP)** reciben cuenta personal al llegar y su descuento automático.")
+    clis = listar(T_CLI, order="nombre")
+    stats = defaultdict(lambda: {"visitas": 0, "gasto": 0.0, "ultima": None})
+    for c in cuentas_con_cliente():
+        s = stats[c["cliente_id"]]
+        if c["estado"] != "cancelada":
+            s["visitas"] += 1
+        if c["estado"] == "pagada":
+            s["gasto"] += float(c["total"] or 0)
+        if not s["ultima"] or c["abierta_ts"] > s["ultima"]:
+            s["ultima"] = c["abierta_ts"]
+
+    a, b, c_ = st.columns(3)
+    a.metric("Clientes registrados", len(clis))
+    b.metric("Habitués VIP", sum(1 for c in clis if c["vip"] and c["activo"]))
+    c_.metric("Consumo histórico", peso(sum(s["gasto"] for s in stats.values())))
+
+    f1, f2 = st.columns([4, 1.4])
+    busca = f1.text_input("Buscar", placeholder="🔎 nombre, apodo o teléfono", key="cl_q").strip().lower()
+    solo_vip = f2.checkbox("Solo VIP", key="cl_vip")
+    filas = []
+    for c in clis:
+        if solo_vip and not c["vip"]:
+            continue
+        if busca and busca not in f"{c['nombre']} {c.get('apodo') or ''} {c.get('telefono') or ''}".lower():
+            continue
+        s = stats[c["id"]]
+        filas.append({"Cliente": c["nombre"], "Apodo": c.get("apodo") or "", "Teléfono": c.get("telefono") or "",
+                      "VIP": "⭐" if c["vip"] else "", "Dto %": float(c.get("descuento_pct") or 0),
+                      "Visitas": s["visitas"], "Consumo total": peso(s["gasto"]),
+                      "Última visita": hop_fmt_dt(s["ultima"]), "Notas": c.get("notas") or "",
+                      "Estado": "" if c["activo"] else "inactivo"})
+    if filas:
+        st.dataframe(pd.DataFrame(filas), hide_index=True, **STRETCH)
+    else:
+        st.info("Todavía no hay clientes con esos filtros.")
+
+    with st.expander("➕ Nuevo cliente"):
+        with st.form("cl_nuevo"):
+            c1, c2, c3 = st.columns([3, 2, 2])
+            n = c1.text_input("Nombre y apellido")
+            ap = c2.text_input("Apodo")
+            tel = c3.text_input("Teléfono")
+            c4, c5 = st.columns([1, 1])
+            vip = c4.checkbox("Habitué VIP")
+            dto = c5.number_input("Descuento automático %", 0.0, 100.0, 0.0, 5.0)
+            nt = st.text_area("Notas (gustos, alergias, preferencias…)")
+            if st.form_submit_button("Guardar cliente", type="primary"):
+                if not n.strip():
+                    st.error("Falta el nombre.")
+                else:
+                    insertar(T_CLI, {"nombre": n.strip(), "apodo": ap.strip(), "telefono": tel.strip(), "vip": vip,
+                                     "descuento_pct": dto, "notas": nt.strip(), "alta_por": actor()})
+                    log("cliente_creado", f"{n.strip()}{' · VIP' if vip else ''}")
+                    st.rerun()
+
+    if clis:
+        mapa = {c["id"]: c for c in clis}
+        sel = st.selectbox("Cliente a editar / ver historial", list(mapa), format_func=lambda i: fmt_cliente(mapa[i]), key="cl_sel")
+        c = mapa[sel]
+        with st.form(f"cl_ed{sel}"):
+            c1, c2, c3 = st.columns([3, 2, 2])
+            n = c1.text_input("Nombre y apellido", c["nombre"])
+            ap = c2.text_input("Apodo", c.get("apodo") or "")
+            tel = c3.text_input("Teléfono", c.get("telefono") or "")
+            c4, c5, c6 = st.columns(3)
+            vip = c4.checkbox("Habitué VIP", c["vip"])
+            dto = c5.number_input("Descuento automático %", 0.0, 100.0, float(c.get("descuento_pct") or 0), 5.0)
+            act = c6.checkbox("Activo", c["activo"])
+            nt = st.text_area("Notas", c.get("notas") or "")
+            if st.form_submit_button("Guardar cambios", type="primary") and n.strip():
+                actualizar(T_CLI, sel, {"nombre": n.strip(), "apodo": ap.strip(), "telefono": tel.strip(), "vip": vip,
+                                        "descuento_pct": dto, "activo": act, "notas": nt.strip()})
+                log("cliente_editado", f"{n.strip()}{' · VIP' if vip else ''}{'' if act else ' · inactivo'}")
+                st.rerun()
+        hist = listar(T_COM, cliente_id=sel, order="id", desc=True, limit=60)
+        st.markdown("**Historial de visitas**")
+        if hist:
+            mm, cm = mapa_mesas(), mapa_clientes()
+            st.dataframe(pd.DataFrame([{"Fecha": hop_fmt_dt(h["abierta_ts"]), "Cuenta": etiqueta_cuenta(h, mm, cm),
+                                        "Estado": h["estado"], "Total": peso(h.get("total") or 0),
+                                        "Medios": h.get("metodo_pago") or ""} for h in hist]),
+                         hide_index=True, **STRETCH)
+        else:
+            st.caption("Todavía no tiene visitas registradas.")
+
+
 def pagina_admin():
     try:
         hay_usuarios = bool(listar(T_USU, limit=1))
@@ -3496,7 +4177,8 @@ def pagina_admin():
         login_ui()
         return
     st.caption(f"Sesión: **{u['nombre']}** ({ROLES[u['rol']]})")
-    secciones = [("📊 Dashboard", admin_dashboard), ("🍺 Productos", admin_productos), ("📦 Stock", admin_stock),
+    secciones = [("📊 Dashboard", admin_dashboard), ("🧾 Operaciones", admin_operaciones), ("⭐ Clientes", admin_clientes),
+                 ("🍺 Productos", admin_productos), ("📦 Stock", admin_stock),
                  ("🪑 Mesas", admin_mesas), ("🕵️ Auditoría", admin_auditoria)]
     if es_dueno():
         secciones += [("💸 Pagos", admin_pagos), ("👥 Usuarios", admin_usuarios), ("🎨 Apariencia", admin_apariencia)]
@@ -3529,6 +4211,16 @@ def main_hopsie():
         st.code(str(e))
         return
     header()
+    if not st.session_state.get("hs_schema_ok"):
+        try:
+            tb(T_CLI).select("id").limit(1).execute()
+            tb(T_COM).select("id,tipo,cliente_id,etiqueta").limit(1).execute()
+            st.session_state["hs_schema_ok"] = True
+        except Exception as e:
+            st.error("Falta actualizar la base de datos: ejecutá **hopsie_migracion_clientes.sql** en el SQL Editor "
+                     "de Supabase y recargá la página.")
+            st.code(str(e))
+            return
     if "_goto" in st.session_state:
         st.session_state["nav"] = st.session_state.pop("_goto")
     elif "nav" not in st.session_state:

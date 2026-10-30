@@ -12,7 +12,8 @@ Enlace directo a HOPSIE: agregar  ?modulo=hopsie  a la dirección de la app.
 Antes de desplegar:
   1) Pañol  → ejecutar migracion_v2.sql y migracion_v3.sql en el SQL Editor de Supabase.
   2) HOPSIE → ejecutar hopsie_schema.sql en el SQL Editor de Supabase (crea las tablas hopsie_*)
-     y después hopsie_migracion_clientes.sql (clientes habitué/VIP, cuentas de barra y cuentas sin mesa).
+     después hopsie_migracion_clientes.sql (clientes habitué/VIP, cuentas de barra y cuentas sin mesa)
+     y por último hopsie_migracion_v3.sql (confirmación del pedido antes de que llegue a cocina/barra).
   3) Secrets de Streamlit Cloud:
 
         [supabase]                        # Pañol (anon public)
@@ -26,6 +27,13 @@ Antes de desplegar:
         [mercadopago]                     # opcional: QR dinámico con el monto exacto
         access_token = "APP_USR-..."
 
+        [whatsapp]                        # opcional: envío automático del ticket .png al cliente (WhatsApp Cloud API)
+        token = "EAAG..."                  # token permanente de la app de Meta
+        phone_id = "1234567890"            # ID del número de WhatsApp Business
+        template = ""                     # (recomendado) plantilla aprobada con encabezado de IMAGEN; vacío = imagen libre (solo dentro de las 24 h)
+        template_lang = "es_AR"
+        template_vars = 0                 # variables del cuerpo de la plantilla: 1={{cliente}}  2=+{{total}}  3=+{{local}}
+
         [admin]                           # opcional: contraseña de rescate del administrador de Pañol
         password = "..."
 
@@ -36,6 +44,7 @@ Antes de desplegar:
      lemon.png (png/jpg/webp/svg). Si falta alguno se muestra una etiqueta de color.
 
 requirements.txt:  streamlit  supabase  pillow  pandas  requests  qrcode[pil]
+packages.txt   :  fonts-dejavu-core        (tipografía del ticket .png; si falta se usa una de respaldo)
 """
 
 import base64
@@ -45,6 +54,7 @@ import io
 import json
 import math
 import os
+import re
 import secrets as pysecrets
 import time
 import unicodedata
@@ -52,12 +62,14 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from html import escape as esc
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 import streamlit as st
-from PIL import Image
+import streamlit.components.v1 as components
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from supabase import create_client
 
 try:
@@ -96,6 +108,18 @@ if _LOGO_FILE and _LOGO_FILE.suffix.lower() != ".svg":
 # ─────────────────────────────────────────
 MOD_PANOL, MOD_HOPSIE = "🔧 Pañol", "🍺 HOPSIE"
 MODULOS = [MOD_PANOL, MOD_HOPSIE]
+
+# La barra de módulos se inyecta ANTES de dibujar el selector, así se ve igual en Pañol y en HOPSIE
+MODULE_BAR_CSS = """
+.st-key-app_modulo { margin: 0 0 14px 0; position: relative; z-index: 5; }
+.st-key-app_modulo div[role="radiogroup"] { gap: 10px; flex-wrap: wrap; }
+.st-key-app_modulo label[data-baseweb="radio"] { padding: 9px 22px; margin: 0; cursor: pointer; border-radius: 999px;
+    border: 2px solid var(--accent, var(--t, #1F5FBF)); background: var(--surface, #111); }
+.st-key-app_modulo label[data-baseweb="radio"] > div:first-child { display: none; }
+.st-key-app_modulo label[data-baseweb="radio"] p { color: var(--text, #fff) !important; font-weight: 700; font-size: 15px; }
+.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) { background: var(--accent, var(--y, #FFE600)); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) p { color: var(--on-accent, #000) !important; }
+"""
 
 if "app_modulo" not in st.session_state:  # primer ingreso: respeta  ?modulo=hopsie
     _qp = str(st.query_params.get("modulo", "")).strip().lower()
@@ -397,7 +421,7 @@ CSS_BASE = """
 .stApp, [data-testid="stAppViewContainer"] { background: var(--bg) !important; color: var(--text); font-family: var(--font), system-ui, sans-serif; }
 [data-testid="stHeader"] { background: var(--bg) !important; }
 #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stAppDeployButton"] { display: none !important; }
-.block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1180px; }
+.block-container { padding-top: 4.5rem !important; padding-bottom: 4rem !important; max-width: 1180px; }
 
 h1, h2, h3, h4, h5 { font-family: var(--font), system-ui, sans-serif !important; color: var(--text) !important; font-weight: 600 !important; letter-spacing: -0.01em; }
 h4 { font-size: 1.15rem !important; }
@@ -579,14 +603,6 @@ div[role="dialog"] { background: var(--bg) !important; color: var(--text); }
     .pn-title { font-size: 18px; }
 }
 
-/* Barra de módulos (Pañol / HOPSIE): se ve como una fila de pestañas */
-.st-key-app_modulo { border-bottom: 1px solid var(--border, #DCE0E8); margin-bottom: 16px; }
-.st-key-app_modulo div[role="radiogroup"] { gap: 6px; }
-.st-key-app_modulo label[data-baseweb="radio"] { padding: 10px 18px; margin: 0; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer; }
-.st-key-app_modulo label[data-baseweb="radio"] > div:first-child { display: none; }
-.st-key-app_modulo label[data-baseweb="radio"] p { color: var(--muted, #647085) !important; font-weight: 600; font-size: 15px; }
-.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) { border-bottom-color: var(--accent, #1F5FBF); }
-.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) p { color: var(--accent, #1F5FBF) !important; }
 """
 
 
@@ -2308,6 +2324,7 @@ PROV_COLOR = {s: c for s, _, c in PROVEEDORES}
 
 _V = tuple(int(x) for x in st.__version__.split(".")[:2] if x.isdigit())
 STRETCH = {"width": "stretch"} if _V >= (1, 50) else {"use_container_width": True}
+ICON_DEL = {"icon": ":material/delete:"} if _V >= (1, 40) else {}
 
 # ─────────────────────────────────────────
 # ESTILO (fondo loquísimo: amarillo · turquesa · rosa · negro · verde)
@@ -2330,7 +2347,7 @@ html,body,[class*="css"],.stApp{font-family:'Poppins',sans-serif}
    radial-gradient(circle at 50% 50%,rgba(11,11,16,.35) 0 90px,transparent 91px),
    repeating-linear-gradient(45deg,rgba(0,0,0,.07) 0 14px,transparent 14px 28px)}
 header[data-testid="stHeader"]{background:transparent}
-.block-container{position:relative;z-index:1;max-width:1250px;margin-top:.8rem;padding:1.4rem 2rem 2.5rem;
+.block-container{position:relative;z-index:1;max-width:1250px;margin-top:3.4rem;padding:1.4rem 2rem 2.5rem;
   background:rgba(10,10,16,.86);backdrop-filter:blur(6px);border:3px solid var(--y);border-radius:22px;
   box-shadow:8px 8px 0 var(--p),16px 16px 0 var(--t)}
 .block-container, .block-container p, .block-container label, .block-container li,
@@ -2361,6 +2378,11 @@ div[data-baseweb="select"] *{color:#fff !important}
 div[data-baseweb="popover"] ul,div[data-baseweb="popover"] li,div[data-baseweb="menu"]{background:#15151d !important;color:#fff !important}
 div[data-baseweb="popover"] li:hover{background:var(--p) !important}
 div[data-baseweb="popover"] *{color:#fff}
+[class*="st-key-del_"] button,[class*="st-key-del_"] [data-testid^="stBaseButton"]{background:#B3122D !important;border-color:#FF4D6D !important;color:#fff !important}
+[class*="st-key-del_"] button:hover{background:#FF1F3D !important;color:#fff !important;box-shadow:3px 3px 0 #000}
+[class*="st-key-del_"] button p{color:#fff !important}
+.draft{border-left:8px dashed var(--y);background:rgba(255,230,0,.08);border-radius:10px;padding:6px 12px;margin:6px 0}
+.sent{border-left:8px solid var(--t);background:rgba(0,229,207,.07);border-radius:10px;padding:6px 12px;margin:6px 0}
 .stRadio div[role="radiogroup"]{gap:.4rem}
 .stRadio label[data-baseweb="radio"]{background:#111;border:2px solid var(--t);border-radius:999px;padding:5px 14px;margin:0}
 .stRadio label[data-baseweb="radio"]>div:first-child{display:none}
@@ -2623,17 +2645,42 @@ def totales(com, items):
 
 def hop_agregar_unidad(com, prod):
     ex = (tb(T_ITEMS).select("*").eq("comanda_id", com["id"]).eq("producto_id", prod["id"])
-          .eq("anulado", False).eq("estado", "pendiente").eq("nota", "").limit(1).execute().data)
+          .eq("anulado", False).eq("estado", "pendiente").eq("nota", "").eq("confirmado", False).limit(1).execute().data)
     if ex:
         actualizar(T_ITEMS, ex[0]["id"], {"cantidad": ex[0]["cantidad"] + 1})
     else:
         insertar(T_ITEMS, {"comanda_id": com["id"], "producto_id": prod["id"], "nombre": prod["nombre"],
                            "sector": prod["sector"], "precio_unit": float(prod["precio"]), "cantidad": 1,
-                           "cargado_por": actor()})
+                           "cargado_por": actor(), "confirmado": False})
     avisos = aplicar_receta(prod["id"], 1, com["id"], f"Comanda #{com['id']}")
     log("item_agregado", f"comanda {com['id']} · {prod['nombre']}")
     for a in avisos:
         st.toast(f"⚠️ Stock negativo: {a}")
+
+
+def sumar_pedido_extra(item):
+    """Suma +1 a un ítem que YA se mandó a cocina/barra: va como pedido nuevo sin confirmar (la cocina no ve cambios a escondidas)."""
+    ex = (tb(T_ITEMS).select("*").eq("comanda_id", item["comanda_id"]).eq("anulado", False)
+          .eq("confirmado", False).eq("nombre", item["nombre"]).eq("nota", item.get("nota") or "")
+          .eq("precio_unit", float(item["precio_unit"])).limit(1).execute().data)
+    if ex:
+        actualizar(T_ITEMS, ex[0]["id"], {"cantidad": ex[0]["cantidad"] + 1})
+    else:
+        insertar(T_ITEMS, {"comanda_id": item["comanda_id"], "producto_id": item["producto_id"], "nombre": item["nombre"],
+                           "sector": item["sector"], "precio_unit": float(item["precio_unit"]), "cantidad": 1,
+                           "nota": item.get("nota") or "", "cargado_por": actor(), "confirmado": False})
+    aplicar_receta(item["producto_id"], 1, item["comanda_id"], f"Comanda #{item['comanda_id']}")
+    log("item_agregado", f"comanda {item['comanda_id']} · +1 {item['nombre']} (pendiente de confirmar)")
+
+
+def confirmar_pedido(com, items):
+    """La moza confirma: recién ahora el pedido llega a cocina / barra."""
+    if not items:
+        return
+    ahora = iso(ahora_utc())
+    tb(T_ITEMS).update({"confirmado": True, "confirmado_ts": ahora}).in_("id", [i["id"] for i in items]).execute()
+    log("pedido_confirmado", f"comanda {com['id']} · " + ", ".join(f"{i['cantidad']}× {i['nombre']}" for i in items))
+    st.toast("Pedido enviado a cocina / barra 🔥")
 
 
 def sumar_cantidad(item, delta):
@@ -2669,7 +2716,7 @@ def cerrar_comanda(com, tot, pagos):
 # ─────────────────────────────────────────
 # LÓGICA: CUENTAS (mesa · barra · cliente VIP) Y CLIENTES
 # ─────────────────────────────────────────
-TIPOS = {"mesa": "🍽️ Mesa", "barra": "🍻 Barra (de pie)", "cliente": "⭐ Cliente VIP (cuenta personal)"}
+TIPOS_CUENTA = {"mesa": "🍽️ Mesa", "barra": "🍻 Barra (de pie)", "cliente": "⭐ Cliente VIP (cuenta personal)"}
 METODOS = ["Efectivo", "QR / Transferencia", "Tarjeta"]
 
 
@@ -2708,6 +2755,8 @@ def etiqueta_cuenta(com, mesas_map, cli_map):
         return "🍻 Barra · " + (com.get("etiqueta") or "sin nombre")
     if m:
         return m["nombre"]
+    if tipo == "mesa" and com.get("etiqueta"):
+        return com["etiqueta"]
     return "Cuenta sin mesa" if not com.get("mesa_id") else "Mesa no disponible"
 
 
@@ -2795,7 +2844,7 @@ def recalcular_comanda(cid):
         actualizar(T_COM, cid, {"total": tot["total"], "metodo_pago": mets})
 
 
-def editar_item(it, cant=None, precio=None, nota=None, nombre=None, tocar_stock=True):
+def hop_editar_item(it, cant=None, precio=None, nota=None, nombre=None, tocar_stock=True):
     cambios, partes = {}, []
     if cant is not None and int(cant) != int(it["cantidad"]):
         delta = int(cant) - int(it["cantidad"])
@@ -2844,13 +2893,13 @@ def form_datos_cuenta(com, key, importes=True):
             clientes.append(cur)
     op_cli = [None] + clientes
     idx_c = next((i for i, c in enumerate(op_cli) if c and c["id"] == com.get("cliente_id")), 0)
-    tipos = list(TIPOS)
+    tipos = list(TIPOS_CUENTA)
     if com.get("mesa_id") and com["mesa_id"] not in {m["id"] for m in mesas_all}:
         st.warning("Esta cuenta apunta a una mesa que ya no existe. Elegí una mesa válida o pasala a barra / VIP.")
     elif abierta and com.get("mesa_id") and com["mesa_id"] not in {m["id"] for m in mesas_all if m["activa"]}:
         st.warning("Esta cuenta está en una mesa desactivada (por eso el salón la cuenta como ocupada). Podés moverla acá.")
     with st.form(f"edc_{key}"):
-        tipo = st.selectbox("Tipo de cuenta", tipos, index=tipos.index(com.get("tipo") or "mesa"), format_func=TIPOS.get)
+        tipo = st.selectbox("Tipo de cuenta", tipos, index=tipos.index(com.get("tipo") or "mesa"), format_func=TIPOS_CUENTA.get)
         a, b = st.columns(2)
         mesa = a.selectbox("Mesa", op_mesa, index=idx_m,
                            format_func=lambda m: "— sin mesa —" if m is None else f"{m['nombre']} ({m['zona']})")
@@ -2906,40 +2955,437 @@ def form_datos_cuenta(com, key, importes=True):
 # ─────────────────────────────────────────
 # TICKET / PRE-CUENTA
 # ─────────────────────────────────────────
-def ticket_html(com, mesa, items, tot):
+TITULO_TICKET = {"abierta": "PRE-CUENTA", "pagada": "COMPROBANTE DE PAGO", "cancelada": "CUENTA ANULADA"}
+
+
+def _linea_pago(p):
+    prov = f" · {p['proveedor']}" if p.get("proveedor") else ""
+    return f"{p['metodo']}{prov}"
+
+
+def ticket_html(com, mesa, items, tot, pagos=None, cli=None):
     act = [i for i in items if not i.get("anulado")]
-    filas = "".join(
-        f"<tr><td>{i['cantidad']}×</td><td>{esc(i['nombre'])}</td>"
-        f"<td style='text-align:right'>{peso(float(i['precio_unit']) * i['cantidad'])}</td></tr>" for i in act)
+    filas = ""
+    for i in act:
+        nota = f"<br><small>📝 {esc(i['nota'])}</small>" if i.get("nota") else ""
+        filas += (f"<tr><td>{i['cantidad']}×</td><td>{esc(i['nombre'])}{nota}</td>"
+                  f"<td style='text-align:right'>{peso(float(i['precio_unit']) * i['cantidad'])}</td></tr>")
     extra = ""
     if tot["desc"]:
         extra += f"<tr><td colspan=2>Descuento {com['descuento_pct']:g}%</td><td style='text-align:right'>-{peso(tot['desc'])}</td></tr>"
     if tot["prop"]:
         extra += f"<tr><td colspan=2>Propina {com['propina_pct']:g}%</td><td style='text-align:right'>{peso(tot['prop'])}</td></tr>"
+    pag = ""
+    if pagos:
+        pag = "<tr><td colspan=3><hr></td></tr><tr><td colspan=3><b>PAGOS</b></td></tr>" + "".join(
+            f"<tr><td colspan=2>{esc(_linea_pago(p))}</td><td style='text-align:right'>{peso(p['monto'])}</td></tr>" for p in pagos)
     lg = logo_uri()
     img = f'<div style="text-align:center"><img src="{lg}" style="max-height:60px"></div>' if lg else ""
     nombre = esc(CFG.get("negocio_nombre") or "HOPSIE · Cerveza Artesanal")
     pie = esc(CFG.get("ticket_pie") or "¡Gracias por visitarnos! 🍻")
+    titulo = TITULO_TICKET.get(com.get("estado"), "PRE-CUENTA")
+    meta = [f"Comanda #{com['id']}"]
+    if com.get("mozo"):
+        meta.append(f"Atendió: {esc(com['mozo'])}")
+    if cli:
+        meta.append(f"Cliente: {esc(cli['nombre'])}")
+    cerr = f" → {hop_fmt_dt(com['cerrada_ts'])}" if com.get("cerrada_ts") else ""
     return (f'<div class="paper">{img}<div style="text-align:center;font-weight:bold">{nombre}</div>'
-            f'<div style="text-align:center">PRE-CUENTA · {esc(mesa["nombre"])}<br>{hop_fmt_dt(com["abierta_ts"])}</div><hr>'
+            f'<div style="text-align:center">{titulo} · {esc(mesa["nombre"])}<br>{hop_fmt_dt(com["abierta_ts"])}{cerr}'
+            f'<br><small>{" · ".join(meta)}</small></div><hr>'
             f"<table>{filas}<tr><td colspan=3><hr></td></tr>"
             f"<tr><td colspan=2>Subtotal</td><td style='text-align:right'>{peso(tot['sub'])}</td></tr>{extra}"
-            f"<tr><td colspan=2><b>TOTAL</b></td><td style='text-align:right'><b>{peso(tot['total'])}</b></td></tr>"
+            f"<tr><td colspan=2><b>TOTAL</b></td><td style='text-align:right'><b>{peso(tot['total'])}</b></td></tr>{pag}"
             f'</table><hr><div style="text-align:center">{pie}</div></div>')
 
 
-def ticket_txt(com, mesa, items, tot):
+def ticket_txt(com, mesa, items, tot, pagos=None):
     act = [i for i in items if not i.get("anulado")]
+    titulo = TITULO_TICKET.get(com.get("estado"), "PRE-CUENTA")
     L = [CFG.get("negocio_nombre") or "HOPSIE · Cerveza Artesanal",
-         f"PRE-CUENTA · {mesa['nombre']} · {hop_fmt_dt(com['abierta_ts'])}", "-" * 34]
-    L += [f"{i['cantidad']}x {i['nombre']:<20} {peso(float(i['precio_unit']) * i['cantidad']):>10}" for i in act]
+         f"{titulo} · {mesa['nombre']} · {hop_fmt_dt(com['abierta_ts'])}", f"Comanda #{com['id']}", "-" * 34]
+    for i in act:
+        L.append(f"{i['cantidad']}x {i['nombre']:<20} {peso(float(i['precio_unit']) * i['cantidad']):>10}")
+        if i.get("nota"):
+            L.append(f"   · {i['nota']}")
     L += ["-" * 34, f"Subtotal {peso(tot['sub'])}"]
     if tot["desc"]:
         L.append(f"Descuento -{peso(tot['desc'])}")
     if tot["prop"]:
         L.append(f"Propina {peso(tot['prop'])}")
-    L += [f"TOTAL {peso(tot['total'])}", "", CFG.get("ticket_pie") or "¡Gracias por visitarnos!"]
+    L.append(f"TOTAL {peso(tot['total'])}")
+    if pagos:
+        L += ["", "PAGOS"] + [f"{_linea_pago(p)} {peso(p['monto'])}" for p in pagos]
+    L += ["", CFG.get("ticket_pie") or "¡Gracias por visitarnos!"]
     return "\n".join(L)
+
+
+# ─────────────────────────────────────────
+# TICKET EN IMAGEN (.png) — misma información y orden que el ticket de pre-cobro
+# ─────────────────────────────────────────
+_TTF = {False: ["DejaVuSansMono.ttf", "LiberationMono-Regular.ttf", "NotoSansMono-Regular.ttf", "DejaVuSans.ttf"],
+        True: ["DejaVuSansMono-Bold.ttf", "LiberationMono-Bold.ttf", "NotoSansMono-Bold.ttf", "DejaVuSans-Bold.ttf"]}
+_TTF_DIRS = [BASE_DIR / "fonts", BASE_DIR, Path("/usr/share/fonts/truetype/dejavu"),
+             Path("/usr/share/fonts/truetype/liberation"), Path("/usr/share/fonts/truetype/noto"),
+             Path("/usr/share/fonts/dejavu"), Path("/usr/share/fonts/TTF")]
+
+
+def _fuente(bold, size):
+    for nombre in _TTF[bool(bold)]:
+        for carpeta in _TTF_DIRS + [None]:
+            try:
+                return ImageFont.truetype(str(carpeta / nombre) if carpeta else nombre, size)
+            except Exception:
+                continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _alto(fo):
+    return getattr(fo, "size", 16)
+
+
+def _sin_emoji(t):
+    """Pillow no dibuja emojis a color: se quitan del texto del .png (en pantalla se ven igual)."""
+    def _ok(ch):
+        o = ord(ch)
+        return (o <= 0xFFFF and not (0x2300 <= o <= 0x23FF or 0x2600 <= o <= 0x27BF or 0x2B00 <= o <= 0x2BFF)
+                and ch not in "\ufe0f\u200d")
+    return "".join(ch for ch in str(t or "") if _ok(ch)).strip()
+
+
+def _logo_pil():
+    try:
+        if CFG.get("logo_b64"):
+            return Image.open(io.BytesIO(base64.b64decode(CFG["logo_b64"]))).convert("RGBA")
+        if _LOGO_FILE and _LOGO_FILE.suffix.lower() != ".svg":
+            return Image.open(_LOGO_FILE).convert("RGBA")
+    except Exception:
+        pass
+    return None
+
+
+def ticket_png(com, nombre, items, tot, pagos=None, cli=None):
+    """Genera la imagen del ticket lista para mandar por WhatsApp. Devuelve bytes PNG."""
+    W, M = 760, 48
+    INK, GRIS, PAPEL, AMARILLO = (20, 20, 20), (110, 110, 110), (255, 253, 242), (255, 230, 0)
+    F = {"s": _fuente(False, 24), "b": _fuente(True, 25), "sm": _fuente(False, 19), "h": _fuente(True, 29),
+         "n": _fuente(True, 34), "t": _fuente(True, 56)}
+    img = Image.new("RGB", (W, 4200), PAPEL)
+    d = ImageDraw.Draw(img)
+    st_y = [44]
+
+    def ancho(t, fo):
+        return d.textlength(t, font=fo)
+
+    def envolver(t, fo, max_w):
+        lineas, act = [], ""
+        for w in str(t).split():
+            prueba = (act + " " + w).strip()
+            if ancho(prueba, fo) <= max_w:
+                act = prueba
+                continue
+            if act:
+                lineas.append(act)
+            act = w
+            while ancho(act, fo) > max_w and len(act) > 1:  # palabra más larga que la línea
+                k = len(act)
+                while k > 1 and ancho(act[:k], fo) > max_w:
+                    k -= 1
+                lineas.append(act[:k])
+                act = act[k:]
+        if act:
+            lineas.append(act)
+        return lineas or [""]
+
+    def centrado(t, fo, fill=INK):
+        for ln in envolver(t, fo, W - 2 * M):
+            d.text(((W - ancho(ln, fo)) / 2, st_y[0]), ln, font=fo, fill=fill)
+            st_y[0] += int(_alto(fo) * 1.35)
+
+    def fila(izq, der, fo, fill=INK, sangria=0):
+        w_der = ancho(der, fo) if der else 0
+        for k, ln in enumerate(envolver(izq, fo, W - 2 * M - w_der - 24 - sangria)):
+            d.text((M + sangria, st_y[0]), ln, font=fo, fill=fill)
+            if k == 0 and der:
+                d.text((W - M - w_der, st_y[0]), der, font=fo, fill=fill)
+            st_y[0] += int(_alto(fo) * 1.32)
+
+    def sep():
+        st_y[0] += 8
+        x = M
+        while x < W - M:
+            d.line([(x, st_y[0]), (x + 10, st_y[0])], fill=GRIS, width=2)
+            x += 18
+        st_y[0] += 20
+
+    act = [i for i in items if not i.get("anulado")]
+    lg = _logo_pil()
+    if lg:
+        lg.thumbnail((380, 130))
+        img.paste(lg, (int((W - lg.width) / 2), st_y[0]), lg)
+        st_y[0] += lg.height + 16
+    centrado(_sin_emoji(CFG.get("negocio_nombre") or "HOPSIE · Cerveza Artesanal"), F["h"])
+    centrado(TITULO_TICKET.get(com.get("estado"), "PRE-CUENTA"), F["n"])
+    centrado(_sin_emoji(nombre), F["b"])
+    cerr = f"  →  {hop_fmt_dt(com['cerrada_ts'])}" if com.get("cerrada_ts") else ""
+    centrado(f"{hop_fmt_dt(com['abierta_ts'])}{cerr}", F["sm"], GRIS)
+    meta = [f"Comanda #{com['id']}"]
+    if com.get("mozo"):
+        meta.append(f"Atendió: {_sin_emoji(com['mozo'])}")
+    if cli:
+        meta.append(f"Cliente: {_sin_emoji(cli['nombre'])}")
+    centrado("  ·  ".join(meta), F["sm"], GRIS)
+    sep()
+
+    for i in act:
+        fila(f"{i['cantidad']}× {_sin_emoji(i['nombre'])}", peso(float(i["precio_unit"]) * i["cantidad"]), F["s"])
+        if i.get("nota"):
+            fila(f"• {_sin_emoji(i['nota'])}", "", F["sm"], GRIS, sangria=34)
+    if not act:
+        centrado("(sin consumos)", F["sm"], GRIS)
+    sep()
+    fila("Subtotal", peso(tot["sub"]), F["s"])
+    if tot["desc"]:
+        fila(f"Descuento {com['descuento_pct']:g}%", "-" + peso(tot["desc"]), F["s"])
+    if tot["prop"]:
+        fila(f"Propina {com['propina_pct']:g}%", peso(tot["prop"]), F["s"])
+    st_y[0] += 10
+    alto_b = 92
+    y0 = st_y[0]
+    d.rounded_rectangle([M - 10, y0, W - M + 10, y0 + alto_b], radius=16, fill=INK)
+    d.text((M + 8, y0 + (alto_b - _alto(F["n"])) / 2 - 3), "TOTAL", font=F["n"], fill=AMARILLO)
+    tt = peso(tot["total"])
+    d.text((W - M - 8 - ancho(tt, F["t"]), y0 + (alto_b - _alto(F["t"])) / 2 - 5), tt, font=F["t"], fill=AMARILLO)
+    st_y[0] = y0 + alto_b + 22
+
+    if pagos:
+        sep()
+        fila("PAGOS", "", F["b"])
+        for p in pagos:
+            fila(_sin_emoji(_linea_pago(p)), peso(p["monto"]), F["s"])
+    if com.get("estado") == "abierta" and CFG.get("negocio_alias"):
+        sep()
+        centrado("Podés pagar por transferencia", F["sm"], GRIS)
+        centrado(f"Alias: {CFG['negocio_alias']}", F["b"])
+        if CFG.get("negocio_titular"):
+            centrado(f"Titular: {_sin_emoji(CFG['negocio_titular'])}", F["sm"], GRIS)
+    sep()
+    centrado(_sin_emoji(CFG.get("ticket_pie")) or "¡Gracias por visitarnos!", F["b"])
+
+    H = st_y[0] + 40
+    papel = img.crop((0, 0, W, H))
+    mask = Image.new("L", (W, H), 255)  # borde dentado arriba y abajo, como un ticket de verdad
+    md = ImageDraw.Draw(mask)
+    paso, diente = 22, 12
+    for x in range(0, W, paso):
+        md.polygon([(x, H), (x + paso / 2, H - diente), (x + paso, H)], fill=0)
+        md.polygon([(x, 0), (x + paso / 2, diente), (x + paso, 0)], fill=0)
+
+    PAD = 56
+    CW, CH = W + 2 * PAD, H + 2 * PAD
+    fondo = Image.new("RGB", (CW, CH))
+    fd = ImageDraw.Draw(fondo)
+    tramos = [(255, 230, 0), (0, 229, 207), (255, 46, 147)]  # amarillo → turquesa → rosa (colores de HOPSIE)
+    for yy in range(CH):
+        t = yy / max(1, CH - 1) * (len(tramos) - 1)
+        k = min(int(t), len(tramos) - 2)
+        f_ = t - k
+        col = tuple(int(tramos[k][c] + (tramos[k + 1][c] - tramos[k][c]) * f_) for c in range(3))
+        fd.line([(0, yy), (CW, yy)], fill=col)
+    sombra = Image.new("L", (CW, CH), 0)
+    sombra.paste(mask, (PAD + 8, PAD + 12))
+    sombra = sombra.filter(ImageFilter.GaussianBlur(10)).point(lambda v: int(v * 0.45))
+    fondo.paste((0, 0, 0), (0, 0, CW, CH), sombra)
+    fondo.paste(papel, (PAD, PAD), mask)
+    buf = io.BytesIO()
+    fondo.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────
+# WHATSAPP
+# ─────────────────────────────────────────
+def tel_wa(tel):
+    """Normaliza un teléfono argentino al formato de WhatsApp (549 + área + número, sin 0 ni 15). '' si no es válido."""
+    raw = str(tel or "").strip()
+    d = "".join(ch for ch in raw if ch.isdigit()).lstrip("0")
+    if not d:
+        return ""
+    if raw.startswith("+") and not d.startswith("54"):
+        return d if 8 <= len(d) <= 15 else ""  # número de otro país, tal cual
+    n = d[2:] if d.startswith("54") else d
+    if n.startswith("9"):
+        n = n[1:]
+    if len(n) == 12:  # sacó el "15" del celular: 11 15 5555 1234
+        for k in (2, 3, 4):
+            if n[k:k + 2] == "15":
+                n = n[:k] + n[k + 2:]
+                break
+    return "549" + n if len(n) == 10 else ""
+
+
+def wa_config():
+    try:
+        if "whatsapp" not in st.secrets:
+            return None
+        sec = st.secrets["whatsapp"]
+        tok, pid = str(sec.get("token", "")).strip(), str(sec.get("phone_id", "")).strip()
+        if not tok or not pid:
+            return None
+        return {"token": tok, "phone_id": pid, "version": str(sec.get("version", "v21.0")),
+                "template": str(sec.get("template", "")).strip(), "lang": str(sec.get("template_lang", "es_AR")),
+                "vars": int(sec.get("template_vars", 0) or 0)}
+    except Exception:
+        return None
+
+
+def enviar_ticket_wa(com, nombre, items, tot, pagos, cli, telefono):
+    """Manda el ticket .png por la API oficial de WhatsApp (Cloud API). Devuelve (ok, mensaje)."""
+    cfg, num = wa_config(), tel_wa(telefono)
+    if not cfg:
+        return False, "WhatsApp automático no está configurado (Secrets [whatsapp])."
+    if not num:
+        return False, "El teléfono del cliente no es válido."
+    try:
+        png = ticket_png(com, nombre, items, tot, pagos, cli)
+        base = f"https://graph.facebook.com/{cfg['version']}/{cfg['phone_id']}"
+        h = {"Authorization": f"Bearer {cfg['token']}"}
+        r = requests.post(base + "/media", headers=h, data={"messaging_product": "whatsapp", "type": "image/png"},
+                          files={"file": (f"ticket_{com['id']}.png", png, "image/png")}, timeout=30)
+        if r.status_code >= 400:
+            return False, "WhatsApp rechazó la imagen: " + str((r.json().get("error") or {}).get("message", r.text))[:200]
+        media_id = r.json()["id"]
+        negocio = CFG.get("negocio_nombre") or "HOPSIE"
+        if cfg["template"]:
+            comp = [{"type": "header", "parameters": [{"type": "image", "image": {"id": media_id}}]}]
+            vars_ = [(cli or {}).get("nombre") or "cliente", peso(tot["total"]), negocio][:cfg["vars"]]
+            if vars_:
+                comp.append({"type": "body", "parameters": [{"type": "text", "text": str(v)} for v in vars_]})
+            payload = {"messaging_product": "whatsapp", "to": num, "type": "template",
+                       "template": {"name": cfg["template"], "language": {"code": cfg["lang"]}, "components": comp}}
+        else:
+            payload = {"messaging_product": "whatsapp", "to": num, "type": "image",
+                       "image": {"id": media_id, "caption": f"{negocio} · {nombre} · Total {peso(tot['total'])}. ¡Gracias!"}}
+        r = requests.post(base + "/messages", headers={**h, "Content-Type": "application/json"}, json=payload, timeout=30)
+        if r.status_code >= 400:
+            return False, "WhatsApp no pudo entregarlo: " + str((r.json().get("error") or {}).get("message", r.text))[:200]
+        log("ticket_whatsapp", f"comanda {com['id']} → +{num}")
+        return True, f"Ticket enviado por WhatsApp a +{num}"
+    except Exception as e:
+        return False, f"No pude enviar el ticket: {e}"
+
+
+def boton_compartir(png, fname, texto):
+    """Celulares: abre el menú de compartir del sistema con la imagen adjunta (elegís WhatsApp y el contacto)."""
+    b64 = base64.b64encode(png).decode()
+    html = f"""
+<button id="b" style="width:100%;padding:9px 12px;border-radius:12px;border:2px solid #00E5CF;background:#111;color:#fff;
+ font-weight:700;font-family:sans-serif;font-size:15px;cursor:pointer">📤 Compartir imagen (celular)</button>
+<script>
+const B64="{b64}", NOMBRE={json.dumps(fname)}, TEXTO={json.dumps(texto)};
+document.getElementById('b').onclick = async () => {{
+  try {{
+    const bin = atob(B64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const file = new File([arr], NOMBRE, {{type: 'image/png'}});
+    if (navigator.canShare && navigator.canShare({{files: [file]}})) {{
+      await navigator.share({{files: [file], text: TEXTO}});
+    }} else {{
+      alert('Este navegador no permite compartir la imagen directo. Descargá el .png y adjuntalo en WhatsApp.');
+    }}
+  }} catch (e) {{
+    if (!e || e.name !== 'AbortError') alert('No se pudo abrir el menú de compartir. Descargá el .png y adjuntalo en WhatsApp.');
+  }}
+}};
+</script>"""
+    components.html(html, height=56)
+
+
+def acciones_ticket(com, nombre, items, tot, pagos, cli, key):
+    """Descargar .png, enviar por WhatsApp y cargar el teléfono del cliente. Devuelve el png generado."""
+    png = ticket_png(com, nombre, items, tot, pagos, cli)
+    fname = f"ticket_{com['id']}_{slugificar(_sin_emoji(nombre)) or 'cuenta'}.png"
+    negocio = CFG.get("negocio_nombre") or "HOPSIE"
+    st.markdown("**📲 Ticket para el cliente (imagen .png)**")
+    tel = st.text_input("WhatsApp del cliente", value=(cli or {}).get("telefono") or "", key=f"wt_{key}",
+                        placeholder="Ej. 11 5555 1234")
+    num = tel_wa(tel)
+    if tel.strip() and not num:
+        st.caption("⚠️ No reconozco ese número: revisá el código de área y el número.")
+    elif num:
+        st.caption(f"Se envía a +{num}")
+    texto = f"{negocio} · {nombre} · Total {peso(tot['total'])}. ¡Gracias!"
+    b1, b2 = st.columns(2)
+    with b1:
+        st.download_button("⬇ Descargar ticket .png", png, file_name=fname, mime="image/png", key=f"dl_{key}", **STRETCH)
+    with b2:
+        if wa_config():
+            if st.button("📲 Enviar por WhatsApp", key=f"wsend_{key}", type="primary", disabled=not num, **STRETCH):
+                ok, msg = enviar_ticket_wa(com, nombre, items, tot, pagos, cli, tel)
+                (st.success if ok else st.error)(msg)
+        else:
+            st.link_button("📲 Abrir WhatsApp", f"https://wa.me/{num}?text={quote(texto)}", disabled=not num, **STRETCH)
+    if not wa_config():
+        boton_compartir(png, fname, texto)
+        st.caption("Envío automático desactivado (falta `[whatsapp]` en los Secrets). Con el celular, «Compartir imagen» "
+                   "adjunta el ticket; en la compu descargá el .png y adjuntalo en el chat.")
+    with st.popover("➕ Guardar / cambiar el teléfono del cliente"):
+        nn = st.text_input("Nombre", value=(cli or {}).get("nombre") or "", key=f"gn_{key}")
+        tt = st.text_input("Teléfono", value=(cli or {}).get("telefono") or "", key=f"gt_{key}")
+        if st.button("Guardar y asociar a la cuenta", key=f"gs_{key}"):
+            if cli:
+                actualizar(T_CLI, cli["id"], {"telefono": tt.strip()})
+                log("cliente_editado", f"{cli['nombre']} · teléfono desde ticket")
+            elif nn.strip():
+                nuevo = registrar_cliente(nn, tt)
+                if nuevo:
+                    actualizar(T_COM, com["id"], {"cliente_id": nuevo["id"]})
+                    log("cuenta_editada", f"comanda {com['id']} · cliente asociado desde ticket")
+            else:
+                st.error("Cargá el nombre del cliente.")
+                return png
+            st.rerun()
+    return png
+
+
+def ticket_de_cuenta(cid, key):
+    """Ticket completo de cualquier comanda (abierta, cobrada o anulada) con sus acciones. Se usa en Operaciones y Auditoría."""
+    com = uno(T_COM, cid)
+    if not com:
+        st.warning(f"La comanda #{cid} ya no existe (fue eliminada).")
+        return
+    cli = uno(T_CLI, com["cliente_id"]) if com.get("cliente_id") else None
+    nombre = etiqueta_cuenta(com, mapa_mesas(), {cli["id"]: cli} if cli else {})
+    items = items_de([cid])
+    tot = totales(com, items)
+    pagos = listar(T_PAGOS, comanda_id=cid, order="id")
+    izq, der = st.columns(2, gap="large")
+    with izq:
+        st.markdown(ticket_html(com, {"nombre": nombre}, items, tot, pagos, cli), unsafe_allow_html=True)
+    with der:
+        png = acciones_ticket(com, nombre, items, tot, pagos, cli, key)
+        with st.expander("👁️ Ver la imagen que recibe el cliente"):
+            st.image(png, width=360)
+
+
+def cerrar_y_enviar(com, tot, pagos):
+    """Cierra la cuenta cobrada y, si hay WhatsApp configurado y el cliente tiene teléfono, le manda el ticket."""
+    cerrar_comanda(com, tot, pagos)
+    try:
+        if wa_config() and CFG.get("wa_auto", "1") == "1" and com.get("cliente_id"):
+            cli = uno(T_CLI, com["cliente_id"])
+            if cli and tel_wa(cli.get("telefono")):
+                com2 = uno(T_COM, com["id"])
+                items = items_de([com["id"]])
+                pagos2 = listar(T_PAGOS, comanda_id=com["id"], order="id")
+                nombre = etiqueta_cuenta(com2, mapa_mesas(), {cli["id"]: cli})
+                ok, msg = enviar_ticket_wa(com2, nombre, items, totales(com2, items), pagos2, cli, cli["telefono"])
+                st.toast(("📲 " if ok else "⚠️ ") + msg)
+    except Exception as e:
+        st.toast(f"⚠️ No pude enviar el ticket: {e}")
 
 
 # ─────────────────────────────────────────
@@ -3203,31 +3649,59 @@ def pagina_comanda():
     with der:
         todos = listar(T_ITEMS, comanda_id=cid, order="id")
         activos = [i for i in todos if not i["anulado"]]
+        borrador = [i for i in activos if not i.get("confirmado", True)]
+        enviados = [i for i in activos if i.get("confirmado", True)]
         st.markdown("#### Consumo")
         if not activos:
             st.caption("Todavía no se cargó nada.")
-        for it in activos:
+
+        def fila_item(it, enviado):
             c1, c2, c3, c4, c5 = st.columns([6, 1.2, 1.2, 1.2, 1.2])
             nota = f" · 📝 {esc(it['nota'])}" if it["nota"] else ""
+            icono = ICONO_ESTADO.get(it["estado"], "") if enviado else "📝"
+            aviso = ""
+            if enviado and it["estado"] == "preparando":
+                aviso = "<br><small>🔥 Ya se está preparando: avisá a cocina/barra si hay un cambio</small>"
+            elif enviado and it["estado"] == "servido":
+                aviso = "<br><small>✅ Ya fue servido</small>"
             c1.markdown(
-                f"{ICONO_ESTADO.get(it['estado'], '')} **{it['cantidad']}× {esc(it['nombre'])}**<br>"
-                f"<small>{peso(float(it['precio_unit']) * it['cantidad'])}{nota}</small>", unsafe_allow_html=True)
+                f"{icono} **{it['cantidad']}× {esc(it['nombre'])}**<br>"
+                f"<small>{peso(float(it['precio_unit']) * it['cantidad'])}{nota}</small>{aviso}", unsafe_allow_html=True)
             if c2.button("➖", key=f"mn{it['id']}"):
                 sumar_cantidad(it, -1)
                 st.rerun()
             if c3.button("➕", key=f"mas{it['id']}"):
-                sumar_cantidad(it, 1)
+                if enviado:
+                    sumar_pedido_extra(it)  # lo ya enviado no se toca: el extra queda sin confirmar
+                else:
+                    sumar_cantidad(it, 1)
                 st.rerun()
             with c4.popover("✏️"):
                 nq = st.number_input("Cantidad", 1, 999, int(it["cantidad"]), key=f"eq{it['id']}")
                 npz = st.number_input("Precio unitario", 0.0, 10_000_000.0, float(it["precio_unit"]), 100.0, key=f"ep{it['id']}")
                 nv = st.text_input("Nota para cocina/barra", value=it["nota"], key=f"nt{it['id']}")
                 if st.button("Guardar", key=f"gn{it['id']}"):
-                    editar_item(it, nq, npz, nv.strip())
+                    hop_editar_item(it, nq, npz, nv.strip())
                     st.rerun()
             if c5.button("🗑️", key=f"del{it['id']}"):
                 anular_item(it)
                 st.rerun()
+
+        if borrador:
+            st.markdown("<div class='draft'><b>📝 Pedido sin confirmar</b><br>"
+                        "<small>Todavía NO llegó a cocina ni a barra. Cambialo o quitá lo que haga falta; "
+                        "cuando el cliente lo confirme, enviá el pedido.</small></div>", unsafe_allow_html=True)
+            for it in borrador:
+                fila_item(it, False)
+            n_un = sum(int(i["cantidad"]) for i in borrador)
+            if st.button(f"✅ Confirmar pedido y enviar a cocina / barra ({n_un})", type="primary",
+                         key=f"cf{cid}", **STRETCH):
+                confirmar_pedido(com, borrador)
+                st.rerun()
+        if enviados:
+            st.markdown("<div class='sent'><b>🔥 Enviado a cocina / barra</b></div>", unsafe_allow_html=True)
+            for it in enviados:
+                fila_item(it, True)
 
         # descuento / propina
         d1, d2 = st.columns(2)
@@ -3248,15 +3722,18 @@ def pagina_comanda():
             st.caption(f"≈ {peso(math.ceil(tot['total'] / com['comensales']))} por persona ({com['comensales']} comensales)")
 
         b1, b2 = st.columns(2)
-        if b1.button("💳 Cobrar", type="primary", disabled=not activos, **STRETCH):
+        if b1.button("💳 Cobrar", type="primary", disabled=(not activos) or bool(borrador), **STRETCH):
             go(P_COBRO)
         if b2.button("⬅ Salón", **STRETCH):
             go(P_SALON)
+        if borrador:
+            st.caption("⚠️ Confirmá el pedido antes de cobrar: lo que no se confirma no llega a cocina/barra.")
 
         with st.expander("🧾 Pre-cuenta"):
-            st.markdown(ticket_html(com, mesa, activos, tot), unsafe_allow_html=True)
+            st.markdown(ticket_html(com, mesa, activos, tot, cli=cli), unsafe_allow_html=True)
             st.download_button("⬇ Descargar .txt", ticket_txt(com, mesa, activos, tot),
                                file_name=f"precuenta_{mesa['nombre'].replace(' ', '_')}.txt")
+            acciones_ticket(com, mesa["nombre"], activos, tot, [], cli, f"pc{cid}")
 
         with st.expander("✏️ Editar cuenta (mesa, cliente, datos)"):
             form_datos_cuenta(com, f"c{cid}", importes=False)
@@ -3365,7 +3842,7 @@ def pagina_cobro():
         st.warning("La comanda no tiene consumos. Anulala desde la comanda.")
         return
     if saldo <= 0:
-        cerrar_comanda(com, tot, pagos)
+        cerrar_y_enviar(com, tot, pagos)
         st.session_state.pop("cid", None)
         st.toast("Mesa cerrada ✅")
         go(P_SALON)
@@ -3395,7 +3872,7 @@ def pagina_cobro():
         log("pago", f"comanda {cid} · {nombre_metodo} {proveedor or ''} · {peso(monto)}")
         nuevos = listar(T_PAGOS, comanda_id=cid)
         if tot["total"] - round(sum(float(p["monto"]) for p in nuevos)) <= 0:
-            cerrar_comanda(com, tot, nuevos)
+            cerrar_y_enviar(com, tot, nuevos)
             st.session_state.pop("cid", None)
             st.toast("Mesa cerrada ✅")
             go(P_SALON)
@@ -3414,17 +3891,18 @@ def _cocina_body():
         st.info("Sin comandas abiertas.")
         return
     mesas, clis = mapa_mesas(), mapa_clientes()
-    its = [i for i in items_de(list(abiertas)) if i["estado"] in ("pendiente", "preparando")]
+    its = [i for i in items_de(list(abiertas))
+           if i["estado"] in ("pendiente", "preparando") and i.get("confirmado", True)]  # solo pedidos confirmados por la moza
     cols = st.columns(2)
     for col, sec in zip(cols, ["Cocina", "Barra"]):
         with col:
             st.markdown(f"### {'👨‍🍳' if sec == 'Cocina' else '🍺'} {sec}")
-            lista = sorted([i for i in its if i["sector"] == sec], key=lambda i: i["ts"])
+            lista = sorted([i for i in its if i["sector"] == sec], key=lambda i: i.get("confirmado_ts") or i["ts"])
             if not lista:
                 st.caption("Todo al día 🎉")
             for it in lista:
                 nom = etiqueta_cuenta(abiertas[it["comanda_id"]], mesas, clis)
-                mins = int((ahora_utc() - parse_ts(it["ts"])).total_seconds() // 60)
+                mins = int((ahora_utc() - parse_ts(it.get("confirmado_ts") or it["ts"])).total_seconds() // 60)
                 nota = f"<br>📝 {esc(it['nota'])}" if it["nota"] else ""
                 st.markdown(
                     f"<div class='kds {it['estado']}'><b>{esc(nom)}</b> · {it['cantidad']}× {esc(it['nombre'])}"
@@ -3440,7 +3918,7 @@ def _cocina_body():
 
 def pagina_cocina():
     st.markdown("### 👨‍🍳 Cocina / Barra")
-    st.caption("Se actualiza solo cada 15 segundos.")
+    st.caption("Se actualiza solo cada 15 segundos. Solo aparecen los pedidos que la moza confirmó.")
     _cocina_body()
 
 
@@ -3528,6 +4006,134 @@ def cargar_ejemplo():
                 o += 1
                 insertar(T_MESAS, {"nombre": f"{pref} {i}", "zona": zona, "capacidad": cap, "orden": o})
     log("datos_ejemplo", "Se cargaron insumos, productos y mesas de ejemplo")
+
+
+# ─────────────────────────────────────────
+# ELIMINAR (con confirmación) — disponible en todo el módulo HOPSIE
+# ─────────────────────────────────────────
+def confirmar_eliminar(key, aviso, accion, etiqueta="Eliminar"):
+    """Botón rojo 'Eliminar' que pide confirmación. accion() devuelve (ok, mensaje)."""
+    with st.popover(etiqueta if ICON_DEL else "🗑️ " + etiqueta, **ICON_DEL):
+        st.warning(aviso)
+        if st.button("Sí, eliminar definitivamente", key=f"del_{key}", type="primary", **ICON_DEL):
+            try:
+                ok, msg = accion()
+            except Exception as e:
+                ok, msg = False, f"No se pudo eliminar: {e}"
+            if ok:
+                st.toast("🗑️ " + msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+
+def _intentar(fn):
+    try:
+        fn()
+        return True
+    except Exception:
+        return False
+
+
+def eliminar_producto(p):
+    if not _intentar(lambda: borrar(T_PROD, p["id"])):
+        tb(T_REC).delete().eq("producto_id", p["id"]).execute()
+        if not _intentar(lambda: borrar(T_PROD, p["id"])):
+            actualizar(T_PROD, p["id"], {"activo": False})
+            log("producto_archivado", p["nombre"])
+            return True, (f"«{p['nombre']}» figura en ventas pasadas y la base no permite borrarlo: "
+                          f"quedó inactivo (ya no aparece en la comanda).")
+    log("producto_eliminado", p["nombre"])
+    return True, f"Producto «{p['nombre']}» eliminado."
+
+
+def eliminar_insumo(i):
+    tb(T_REC).delete().eq("insumo_id", i["id"]).execute()
+    if not _intentar(lambda: borrar(T_INS, i["id"])):
+        tb(T_MOV).delete().eq("insumo_id", i["id"]).execute()
+        if not _intentar(lambda: borrar(T_INS, i["id"])):
+            actualizar(T_INS, i["id"], {"activo": False})
+            log("insumo_archivado", i["nombre"])
+            return True, f"«{i['nombre']}» no se pudo borrar de la base: quedó inactivo."
+    st.session_state.pop("ei", None)
+    log("insumo_eliminado", i["nombre"])
+    return True, f"Insumo «{i['nombre']}» eliminado."
+
+
+def eliminar_mesa(m):
+    ab = [c for c in listar(T_COM, estado="abierta") if c.get("mesa_id") == m["id"]]
+    if ab:
+        return False, (f"No se puede eliminar: {m['nombre']} tiene una cuenta abierta (#{ab[0]['id']}). "
+                       f"Cobrala, anulala o pasala a otra mesa.")
+    for c in listar(T_COM, mesa_id=m["id"]):  # las cuentas históricas conservan el nombre de la mesa
+        if not (c.get("etiqueta") or "").strip():
+            actualizar(T_COM, c["id"], {"etiqueta": m["nombre"]})
+    tb(T_COM).update({"mesa_id": None}).eq("mesa_id", m["id"]).execute()
+    borrar(T_MESAS, m["id"])
+    log("mesa_eliminada", m["nombre"])
+    return True, f"Mesa «{m['nombre']}» eliminada."
+
+
+def eliminar_cliente(c):
+    ab = listar(T_COM, estado="abierta", cliente_id=c["id"])
+    if ab:
+        return False, f"No se puede eliminar: {c['nombre']} tiene una cuenta abierta (#{ab[0]['id']}). Cobrala o anulala primero."
+    tb(T_COM).update({"cliente_id": None}).eq("cliente_id", c["id"]).execute()
+    borrar(T_CLI, c["id"])
+    st.session_state.pop("cl_sel", None)
+    log("cliente_eliminado", f"{c['nombre']} · {c.get('telefono') or 's/tel'}")
+    return True, f"Cliente «{c['nombre']}» eliminado."
+
+
+def eliminar_usuario(u, users):
+    yo = usuario_actual()
+    if yo and u["id"] == yo["id"]:
+        return False, "No podés eliminarte a vos mismo."
+    quedan = [x for x in users if x["id"] != u["id"] and x["rol"] == "dueno" and x["activo"]]
+    if u["rol"] == "dueno" and u["activo"] and not quedan:
+        return False, "Tiene que quedar al menos un dueño activo."
+    borrar(T_USU, u["id"])
+    st.session_state.pop("us_sel", None)
+    log("usuario_eliminado", f"{u['usuario']} ({u['rol']})")
+    return True, f"Usuario «{u['usuario']}» eliminado."
+
+
+def eliminar_item_def(it, estado_com):
+    if not it["anulado"] and estado_com != "cancelada":  # el stock de un ítem vivo vuelve al depósito
+        aplicar_receta(it["producto_id"], -it["cantidad"], it["comanda_id"], f"Eliminación comanda #{it['comanda_id']}")
+    borrar(T_ITEMS, it["id"])
+    log("item_eliminado", f"comanda {it['comanda_id']} · {it['cantidad']}× {it['nombre']}")
+    recalcular_comanda(it["comanda_id"])
+    return True, "Ítem eliminado."
+
+
+def eliminar_comanda(com, devolver_stock):
+    cid = com["id"]
+    if devolver_stock and com["estado"] != "cancelada":
+        for it in items_de([cid]):
+            aplicar_receta(it["producto_id"], -it["cantidad"], cid, f"Comanda eliminada #{cid}")
+    tb(T_MOV).update({"comanda_id": None}).eq("comanda_id", cid).execute()
+    tb(T_PAGOS).delete().eq("comanda_id", cid).execute()
+    tb(T_ITEMS).delete().eq("comanda_id", cid).execute()
+    borrar(T_COM, cid)
+    st.session_state.pop("op_sel", None)
+    if st.session_state.get("cid") == cid:
+        st.session_state.pop("cid", None)
+    log("comanda_eliminada", f"comanda {cid} · {peso(com.get('total') or 0)} · estaba {com['estado']}")
+    return True, f"Comanda #{cid} eliminada."
+
+
+def eliminar_movimiento(m):
+    borrar(T_MOV, m["id"])
+    log("movimiento_eliminado", f"#{m['id']} · {m['tipo']} {float(m['cantidad']):g}")
+    return True, "Movimiento eliminado del historial."
+
+
+def depurar_auditoria(lim):
+    corte = datetime(lim.year, lim.month, lim.day, tzinfo=TZ).astimezone(timezone.utc)
+    tb(T_LOG).delete().lt("ts", iso(corte)).execute()
+    log("auditoria_depurada", f"registros anteriores al {lim:%d/%m/%Y}")
+    return True, "Registros de auditoría depurados."
 
 
 def admin_dashboard():
@@ -3622,6 +4228,9 @@ def admin_productos():
                                                   "sector": sec, "emoji": em, "activo": act})
                     log("producto_editado", n.strip())
                     st.rerun()
+            confirmar_eliminar(f"prod{p['id']}", f"Se elimina «{p['nombre']}» y su receta. Las ventas pasadas no se tocan. "
+                               f"Si el producto figura en ventas y la base no permite borrarlo, queda inactivo.",
+                               lambda p=p: eliminar_producto(p), "Eliminar producto")
             st.markdown(f"**Receta** (insumos que consume 1 unidad) — costo {peso(costo)}{marg}")
             for r in rec:
                 i = imap.get(r["insumo_id"])
@@ -3688,22 +4297,41 @@ def admin_stock():
                 except Exception:
                     st.error("Ya existe un insumo con ese nombre.")
     if insumos:
-        with st.expander("✏️ Editar insumo"):
+        with st.expander("✏️ Editar / eliminar insumo"):
             i = st.selectbox("Insumo a editar", insumos, format_func=lambda x: x["nombre"], key="ei")
             with st.form(f"ei{i['id']}"):
                 n = st.text_input("Nombre", i["nombre"])
+                a0, a00 = st.columns(2)
+                cats = CAT_INSUMOS if i["categoria"] in CAT_INSUMOS else CAT_INSUMOS + [i["categoria"]]
+                unis = UNIDADES if i["unidad"] in UNIDADES else UNIDADES + [i["unidad"]]
+                ca = a0.selectbox("Categoría", cats, index=cats.index(i["categoria"]))
+                un = a00.selectbox("Unidad", unis, index=unis.index(i["unidad"]))
                 a1, a2, a3 = st.columns(3)
                 mi = a1.number_input("Mínimo", 0.0, 1_000_000.0, float(i["minimo"]), 1.0)
                 co = a2.number_input("Costo unit.", 0.0, 10_000_000.0, float(i["costo"]), 10.0)
                 ac = a3.checkbox("Activo", i["activo"])
-                if st.form_submit_button("Guardar"):
-                    actualizar(T_INS, i["id"], {"nombre": n.strip(), "minimo": mi, "costo": co, "activo": ac})
-                    log("insumo_editado", n.strip())
-                    st.rerun()
+                st.caption("Cambiar la unidad no convierte el stock: para corregir cantidades usá un movimiento de Ajuste.")
+                if st.form_submit_button("Guardar", type="primary"):
+                    try:
+                        actualizar(T_INS, i["id"], {"nombre": n.strip(), "categoria": ca, "unidad": un, "minimo": mi,
+                                                    "costo": co, "activo": ac})
+                        log("insumo_editado", n.strip())
+                        st.rerun()
+                    except Exception:
+                        st.error("Ya existe un insumo con ese nombre.")
+            confirmar_eliminar(f"ins{i['id']}", f"Se elimina «{i['nombre']}», se quita de las recetas y se borra su historial de "
+                               f"movimientos. Si la base no lo permite, queda inactivo.",
+                               lambda i=i: eliminar_insumo(i), "Eliminar insumo")
     st.markdown("#### Últimos movimientos")
     movs = listar(T_MOV, order="id", desc=True, limit=150)
     if movs:
         nom = {i["id"]: i["nombre"] for i in insumos}
+        with st.expander("🗑️ Eliminar un movimiento del historial"):
+            mv = st.selectbox("Movimiento", movs[:80], key="mv_sel", format_func=lambda m: (
+                f"#{m['id']} · {hop_fmt_dt(m['ts'])} · {nom.get(m['insumo_id'], '?')} · {m['tipo']} {float(m['cantidad']):g}"))
+            st.caption("Borra solo el renglón del historial: NO cambia el stock actual (para corregirlo usá un Ajuste).")
+            confirmar_eliminar(f"mov{mv['id']}", "Se borra este renglón del historial de movimientos.",
+                               lambda mv=mv: eliminar_movimiento(mv), "Eliminar movimiento")
         st.dataframe(pd.DataFrame([{"Fecha": hop_fmt_dt(m["ts"]), "Insumo": nom.get(m["insumo_id"], "?"), "Tipo": m["tipo"],
                                     "Cantidad": float(m["cantidad"]), "Stock result.": float(m["stock_resultante"]),
                                     "Usuario": m["usuario"], "Motivo": m["motivo"]} for m in movs]), hide_index=True, **STRETCH)
@@ -3750,6 +4378,8 @@ def admin_mesas():
                 actualizar(T_MESAS, m["id"], {"activa": not m["activa"]})
                 log("mesa_estado", f"{m['nombre']} → {'inactiva' if m['activa'] else 'activa'}")
                 st.rerun()
+        confirmar_eliminar(f"mesa{m['id']}", f"Se elimina «{m['nombre']}». Las cuentas pasadas conservan el nombre de la mesa. "
+                           f"No se puede si tiene una cuenta abierta.", lambda m=m: eliminar_mesa(m), "Eliminar mesa")
 
 
 def admin_pagos():
@@ -3819,36 +4449,89 @@ def admin_usuarios():
                     st.rerun()
                 except Exception:
                     st.error("Ese usuario ya existe.")
-    u = st.selectbox("Gestionar usuario", users, format_func=lambda x: f"{x['usuario']} — {x['nombre']}")
-    c1, c2 = st.columns(2)
-    with c1:
-        npw = st.text_input("Nueva contraseña (mín. 8)", type="password", key="rpw")
-        if st.button("Cambiar contraseña") and len(npw) >= 8:
-            s, h = hash_pw(npw)
-            actualizar(T_USU, u["id"], {"salt": s, "pass_hash": h})
-            log("password_cambiada", u["usuario"])
-            st.success("Contraseña actualizada.")
-    with c2:
-        mismo = u["id"] == usuario_actual()["id"]
-        if st.button("Desactivar" if u["activo"] else "Activar", disabled=mismo):
-            actualizar(T_USU, u["id"], {"activo": not u["activo"]})
-            log("usuario_estado", f"{u['usuario']} → {'inactivo' if u['activo'] else 'activo'}")
-            st.rerun()
+    mapa_u = {x["id"]: x for x in users}
+    uid = st.selectbox("Gestionar usuario", list(mapa_u), key="us_sel",
+                       format_func=lambda i: f"{mapa_u[i]['usuario']} — {mapa_u[i]['nombre']}")
+    u = mapa_u[uid]
+    yo = usuario_actual()
+    mismo = u["id"] == yo["id"]
+    st.markdown("**✏️ Editar usuario**")
+    with st.form(f"eu{uid}"):
+        c1, c2 = st.columns(2)
+        nu = c1.text_input("Usuario (para iniciar sesión)", u["usuario"])
+        nn = c2.text_input("Nombre y apellido", u["nombre"])
+        c3, c4 = st.columns(2)
+        roles = list(ROLES)
+        nr = c3.selectbox("Rol", roles, index=roles.index(u["rol"]), format_func=ROLES.get, disabled=mismo)
+        na = c4.checkbox("Activo", u["activo"], disabled=mismo)
         if mismo:
-            st.caption("No podés desactivarte a vos mismo.")
+            st.caption("Tu propio rol y estado no se pueden cambiar desde acá, pero sí tu usuario y nombre.")
+        if st.form_submit_button("💾 Guardar cambios", type="primary"):
+            nu = nu.strip().lower().replace(" ", "")
+            quedan = [x for x in users if x["id"] != uid and x["rol"] == "dueno" and x["activo"]]
+            if not nu or not nn.strip():
+                st.error("Completá usuario y nombre.")
+            elif u["rol"] == "dueno" and u["activo"] and (nr != "dueno" or not na) and not quedan:
+                st.error("Tiene que quedar al menos un dueño activo.")
+            else:
+                try:
+                    actualizar(T_USU, uid, {"usuario": nu, "nombre": nn.strip(), "rol": nr, "activo": na})
+                    log("usuario_editado", f"{u['usuario']} → {nu} · {nn.strip()} · {nr}{'' if na else ' · inactivo'}")
+                    if mismo:
+                        st.session_state["hs_user"].update({"usuario": nu, "nombre": nn.strip()})
+                    st.rerun()
+                except Exception:
+                    st.error("Ya existe otro usuario con ese nombre de acceso.")
+    npw = st.text_input("Nueva contraseña (mín. 8)", type="password", key="rpw")
+    if st.button("🔑 Cambiar contraseña") and len(npw) >= 8:
+        s_, h_ = hash_pw(npw)
+        actualizar(T_USU, uid, {"salt": s_, "pass_hash": h_})
+        log("password_cambiada", u["usuario"])
+        st.success("Contraseña actualizada.")
+    if mismo:
+        st.caption("No podés eliminarte a vos mismo.")
+    else:
+        confirmar_eliminar(f"usr{uid}", f"Se elimina el usuario «{u['usuario']}». Lo que cargó antes sigue figurando en la "
+                           f"auditoría con su nombre de acceso.", lambda: eliminar_usuario(u, users), "Eliminar usuario")
 
 
 def admin_auditoria():
-    st.caption("Todo lo que se carga o modifica queda registrado con usuario y hora.")
+    st.caption("Todo lo que se carga o modifica queda registrado con usuario y hora. "
+               "Tocá un renglón que tenga **Comanda** (o elegila abajo) para ver su ticket completo.")
     rows = listar(T_LOG, order="id", desc=True, limit=600)
     if not rows:
         st.info("Sin registros.")
-        return
-    df = pd.DataFrame([{"Fecha": hop_fmt_dt(r["ts"]), "Usuario": r["usuario"], "Acción": r["accion"], "Detalle": r["detalle"]} for r in rows])
-    f = st.multiselect("Filtrar por usuario", sorted(df["Usuario"].unique()))
-    if f:
-        df = df[df["Usuario"].isin(f)]
-    st.dataframe(df, hide_index=True, **STRETCH)
+    else:
+        def _cid(r):
+            m = re.search(r"(?:comanda\s+#?|#)(\d+)", str(r.get("detalle") or ""))
+            return int(m.group(1)) if m else None
+
+        df = pd.DataFrame([{"Fecha": hop_fmt_dt(r["ts"]), "Usuario": r["usuario"], "Acción": r["accion"],
+                            "Comanda": _cid(r), "Detalle": r["detalle"]} for r in rows])
+        df["Comanda"] = df["Comanda"].astype("Int64")
+        f = st.multiselect("Filtrar por usuario", sorted(df["Usuario"].unique()))
+        if f:
+            df = df[df["Usuario"].isin(f)]
+        elegida = None
+        if _V >= (1, 35):
+            ev = st.dataframe(df, hide_index=True, on_select="rerun", selection_mode="single-row", key="aud_tbl", **STRETCH)
+            filas = list(ev.selection.rows) if ev is not None and ev.selection is not None else []
+            if filas and not pd.isna(df.iloc[filas[0]]["Comanda"]):
+                elegida = int(df.iloc[filas[0]]["Comanda"])
+        else:
+            st.dataframe(df, hide_index=True, **STRETCH)
+        ids = sorted({int(x) for x in df["Comanda"].dropna()}, reverse=True)
+        manual = st.selectbox("Ver ticket de la comanda", [None] + ids, key="aud_cid",
+                              format_func=lambda x: "— elegir —" if x is None else f"Comanda #{x}")
+        cid = elegida or manual
+        if cid:
+            st.markdown(f"#### 🧾 Comanda #{cid}")
+            ticket_de_cuenta(cid, f"au{cid}")
+    if es_dueno():
+        with st.expander("🧹 Depurar registros viejos (solo dueños)"):
+            lim = st.date_input("Eliminar los registros anteriores al", value=date.today() - timedelta(days=90), key="aud_lim")
+            confirmar_eliminar("aud", f"Se borran TODOS los registros de auditoría anteriores al {lim:%d/%m/%Y}. No se puede deshacer.",
+                               lambda: depurar_auditoria(lim), "Depurar auditoría")
 
 
 def admin_apariencia():
@@ -3856,11 +4539,17 @@ def admin_apariencia():
         nom = st.text_input("Nombre en ticket", CFG.get("negocio_nombre", "HOPSIE · Cerveza Artesanal"))
         pie = st.text_input("Pie del ticket", CFG.get("ticket_pie", "¡Gracias por visitarnos! 🍻"))
         prop = st.number_input("Propina sugerida por defecto (%)", 0.0, 30.0, cfg_num("propina_default", 0), 1.0)
+        wa_auto = st.checkbox("Enviar el ticket por WhatsApp automáticamente al cobrar (si el cliente tiene teléfono)",
+                              value=CFG.get("wa_auto", "1") == "1")
+        st.caption("✅ WhatsApp automático configurado." if wa_config() else
+                   "ℹ️ WhatsApp automático necesita `[whatsapp]` en los Secrets (ver instrucciones al inicio del archivo). "
+                   "Mientras tanto el ticket se comparte con el botón de cada cuenta.")
         up = st.file_uploader("Logo de HOPSIE (png/jpg)", type=["png", "jpg", "jpeg", "webp"])
         if st.form_submit_button("Guardar", type="primary"):
             cfg_set("negocio_nombre", nom)
             cfg_set("ticket_pie", pie)
             cfg_set("propina_default", str(prop))
+            cfg_set("wa_auto", "1" if wa_auto else "0")
             if up:
                 img = Image.open(up).convert("RGBA")
                 img.thumbnail((700, 700))
@@ -3940,7 +4629,10 @@ def admin_operaciones():
     if com["estado"] == "pagada" and tot["total"] != pagado:
         st.warning("Lo cobrado no coincide con el total de la cuenta. Ajustá los cobros en la pestaña **Pagos**.")
 
-    t_datos, t_cons, t_pagos, t_estado = st.tabs(["📝 Datos", "🍺 Consumo", "💵 Pagos", "🔁 Estado"])
+    t_tkt, t_datos, t_cons, t_pagos, t_estado = st.tabs(["🧾 Ticket", "📝 Datos", "🍺 Consumo", "💵 Pagos", "🔁 Estado"])
+
+    with t_tkt:
+        ticket_de_cuenta(cid, f"op{cid}")
 
     with t_datos:
         form_datos_cuenta(com, f"op{cid}", importes=True)
@@ -3952,7 +4644,8 @@ def admin_operaciones():
             st.caption("Esta cuenta no tiene consumos.")
         for it in todos:
             sub = float(it["precio_unit"]) * it["cantidad"]
-            with st.expander(f"{'🚫 ' if it['anulado'] else ''}{it['cantidad']}× {it['nombre']} · {peso(sub)}"):
+            with st.expander(f"{'🚫 ' if it['anulado'] else ''}{'📝 ' if not it.get('confirmado', True) else ''}"
+                             f"{it['cantidad']}× {it['nombre']} · {peso(sub)}"):
                 with st.form(f"opi{it['id']}"):
                     a, b, c = st.columns([3, 1, 2])
                     nn = a.text_input("Descripción", it["nombre"])
@@ -3960,7 +4653,7 @@ def admin_operaciones():
                     npz = c.number_input("Precio unitario", 0.0, 10_000_000.0, float(it["precio_unit"]), 100.0)
                     nt = st.text_input("Nota", it.get("nota") or "")
                     if st.form_submit_button("Guardar ítem"):
-                        if editar_item(it, nq, npz, nt.strip(), nn, tocar_stock=tocar and not it["anulado"]):
+                        if hop_editar_item(it, nq, npz, nt.strip(), nn, tocar_stock=tocar and not it["anulado"]):
                             recalcular_comanda(cid)
                         st.rerun()
                 if it["anulado"]:
@@ -3968,10 +4661,12 @@ def admin_operaciones():
                         set_anulado(it, False, com["estado"])
                         recalcular_comanda(cid)
                         st.rerun()
-                elif st.button("🗑️ Anular ítem", key=f"oan{it['id']}"):
+                elif st.button("🚫 Anular ítem", key=f"oan{it['id']}"):
                     set_anulado(it, True, com["estado"])
                     recalcular_comanda(cid)
                     st.rerun()
+                confirmar_eliminar(f"it{it['id']}", "Se borra el renglón de la comanda para siempre (el stock vuelve al depósito si correspondía).",
+                                   lambda it=it: eliminar_item_def(it, com["estado"]), "Eliminar ítem")
         prods = listar(T_PROD, order="nombre", activo=True)
         if prods:
             st.markdown("**Agregar producto a esta cuenta**")
@@ -3983,7 +4678,7 @@ def admin_operaciones():
                     insertar(T_ITEMS, {"comanda_id": cid, "producto_id": p["id"], "nombre": p["nombre"],
                                        "sector": p["sector"], "precio_unit": float(p["precio"]), "cantidad": int(n),
                                        "estado": "pendiente" if com["estado"] == "abierta" else "servido",
-                                       "cargado_por": actor()})
+                                       "cargado_por": actor(), "confirmado": True})
                     if tocar:
                         aplicar_receta(p["id"], int(n), cid, f"Corrección comanda #{cid}")
                     log("item_agregado", f"comanda {cid} · {n}× {p['nombre']} (desde Operaciones)")
@@ -4062,6 +4757,18 @@ def admin_operaciones():
                     st.session_state["cid"] = cid
                     st.toast("Cuenta reabierta ✅")
                     st.rerun()
+        _zona_eliminar_comanda(com)
+
+
+def _zona_eliminar_comanda(com):
+    cid = com["id"]
+    st.divider()
+    st.markdown("##### 🗑️ Eliminar esta comanda")
+    dev = False
+    if com["estado"] != "cancelada":
+        dev = st.checkbox("Devolver al stock los insumos de esta comanda", value=(com["estado"] == "abierta"), key=f"edv{cid}")
+    confirmar_eliminar(f"com{cid}", f"Se elimina la comanda #{cid} con todos sus consumos y cobros. No se puede deshacer.",
+                       lambda: eliminar_comanda(com, dev), "Eliminar comanda")
 
 
 def cuentas_con_cliente():
@@ -4152,6 +4859,9 @@ def admin_clientes():
                                         "descuento_pct": dto, "activo": act, "notas": nt.strip()})
                 log("cliente_editado", f"{n.strip()}{' · VIP' if vip else ''}{'' if act else ' · inactivo'}")
                 st.rerun()
+        confirmar_eliminar(f"cli{sel}", f"Se elimina a «{c['nombre']}» de la base de clientes. Sus cuentas pasadas quedan en el "
+                           f"historial sin ficha ni teléfono. No se puede si tiene una cuenta abierta.",
+                           lambda c=c: eliminar_cliente(c), "Eliminar cliente")
         hist = listar(T_COM, cliente_id=sel, order="id", desc=True, limit=60)
         st.markdown("**Historial de visitas**")
         if hist:
@@ -4215,10 +4925,11 @@ def main_hopsie():
         try:
             tb(T_CLI).select("id").limit(1).execute()
             tb(T_COM).select("id,tipo,cliente_id,etiqueta").limit(1).execute()
+            tb(T_ITEMS).select("id,confirmado,confirmado_ts").limit(1).execute()
             st.session_state["hs_schema_ok"] = True
         except Exception as e:
-            st.error("Falta actualizar la base de datos: ejecutá **hopsie_migracion_clientes.sql** en el SQL Editor "
-                     "de Supabase y recargá la página.")
+            st.error("Falta actualizar la base de datos: ejecutá **hopsie_migracion_clientes.sql** y **hopsie_migracion_v3.sql** "
+                     "en el SQL Editor de Supabase y recargá la página.")
             st.code(str(e))
             return
     if "_goto" in st.session_state:
@@ -4245,6 +4956,7 @@ def main_hopsie():
 # NAVEGACIÓN PRINCIPAL: Pañol | HOPSIE
 # Solo se ejecuta el módulo activo (su estilo y sus consultas), el otro queda en reposo.
 # ══════════════════════════════════════════
+st.markdown(f"<style>{MODULE_BAR_CSS}</style>", unsafe_allow_html=True)
 st.radio("Módulo", MODULOS, horizontal=True, key="app_modulo", label_visibility="collapsed")
 _hopsie_activo = st.session_state["app_modulo"] == MOD_HOPSIE
 st.query_params["modulo"] = "hopsie" if _hopsie_activo else "panol"  # el enlace y F5 conservan el módulo

@@ -56,6 +56,7 @@ import math
 import os
 import re
 import secrets as pysecrets
+import tempfile
 import time
 import unicodedata
 from collections import defaultdict
@@ -2301,8 +2302,8 @@ T_PAGOS, T_MOV = "hopsie_pagos", "hopsie_movs"
 T_CLI = "hopsie_clientes"
 
 P_SALON, P_COMANDA, P_COBRO = "🍽️ Salón", "🧾 Comanda", "💳 Cobro"
-P_COCINA, P_ADMIN = "👨‍🍳 Cocina / Barra", "⚙️ Admin"
-NAV = [P_SALON, P_COMANDA, P_COBRO, P_COCINA, P_ADMIN]
+P_COCINA, P_BARRA, P_ADMIN = "👨‍🍳 Cocina", "🍺 Barra", "⚙️ Admin"
+NAV = [P_SALON, P_COMANDA, P_COBRO, P_COCINA, P_BARRA, P_ADMIN]
 
 ROLES = {"dueno": "Dueño", "encargado": "Encargado"}
 SECTORES = ["Barra", "Cocina"]
@@ -2378,11 +2379,51 @@ div[data-baseweb="select"] *{color:#fff !important}
 div[data-baseweb="popover"] ul,div[data-baseweb="popover"] li,div[data-baseweb="menu"]{background:#15151d !important;color:#fff !important}
 div[data-baseweb="popover"] li:hover{background:var(--p) !important}
 div[data-baseweb="popover"] *{color:#fff}
-[class*="st-key-del_"] button,[class*="st-key-del_"] [data-testid^="stBaseButton"]{background:#B3122D !important;border-color:#FF4D6D !important;color:#fff !important}
-[class*="st-key-del_"] button:hover{background:#FF1F3D !important;color:#fff !important;box-shadow:3px 3px 0 #000}
-[class*="st-key-del_"] button p{color:#fff !important}
+.block-container [class*="st-key-del_"] button,.block-container [class*="st-key-del_"] [data-testid^="stBaseButton"]{background:#B3122D !important;border-color:#FF4D6D !important;color:#fff !important;box-shadow:4px 4px 0 #000 !important}
+.block-container [class*="st-key-del_"] button:hover{background:#FF1F3D !important;color:#fff !important}
+.block-container [class*="st-key-del_"] button p{color:#fff !important}
 .draft{border-left:8px dashed var(--y);background:rgba(255,230,0,.08);border-radius:10px;padding:6px 12px;margin:6px 0}
 .sent{border-left:8px solid var(--t);background:rgba(0,229,207,.07);border-radius:10px;padding:6px 12px;margin:6px 0}
+/* ── Botones grandes, vistosos y legibles ── */
+.block-container .stButton>button,.block-container .stDownloadButton>button,.block-container .stLinkButton>a,
+.block-container [data-testid^="stBaseButton"]{min-height:3.2rem !important;padding:.6rem 1.2rem !important;font-size:1.1rem !important;
+  font-weight:800 !important;letter-spacing:.3px;border-radius:14px !important;border:3px solid var(--t) !important;box-shadow:4px 4px 0 var(--t)}
+.block-container .stButton>button p,.block-container .stDownloadButton>button p,.block-container [data-testid^="stBaseButton"] p{
+  font-size:1.1rem !important;font-weight:800 !important;line-height:1.15;color:inherit !important}
+.block-container .stButton>button:hover,.block-container .stDownloadButton>button:hover,.block-container [data-testid^="stBaseButton"]:hover{
+  transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--p) !important;background:var(--y) !important;color:#000 !important}
+.block-container .stButton>button:active,.block-container [data-testid^="stBaseButton"]:active{transform:translate(3px,3px);box-shadow:0 0 0 var(--p) !important}
+.block-container button[kind="primary"],.block-container [data-testid="stBaseButton-primary"],.block-container [data-testid="stBaseButton-primaryFormSubmit"]{
+  background:linear-gradient(135deg,var(--p),#FF6A3D) !important;border-color:var(--y) !important;box-shadow:4px 4px 0 var(--y);
+  min-height:3.5rem !important;font-size:1.2rem !important;text-transform:uppercase}
+.block-container [data-testid="stBaseButton-primary"] p,.block-container [data-testid="stBaseButton-primaryFormSubmit"] p{font-size:1.2rem !important}
+.block-container input,.block-container textarea{font-size:1.08rem !important}
+[data-testid="stMetricValue"]{font-size:2.1rem !important;font-weight:800}
+.st-key-nav label[data-baseweb="radio"]{padding:10px 22px !important;border-width:3px !important}
+.st-key-nav label[data-baseweb="radio"] p{font-size:1.12rem !important;font-weight:800 !important}
+/* ── Cobro: medios de pago como botones grandes ── */
+.block-container [class*="st-key-met_"] [data-testid="stWidgetLabel"] p{font-size:1.4rem !important;font-weight:900 !important;color:var(--y) !important;text-transform:uppercase;letter-spacing:.6px}
+.block-container [class*="st-key-met_"] div[role="radiogroup"]{gap:14px;flex-wrap:wrap;width:100%}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]{flex:1 1 220px;min-height:96px;justify-content:center;align-items:center;
+  border-radius:20px;border-width:4px;padding:10px 14px;background:#0d0d12;box-shadow:5px 5px 0 rgba(255,255,255,.2)}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"] p{font-size:1.55rem !important;font-weight:900 !important;color:#fff !important;text-align:center;line-height:1.1}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(1){border-color:#39FF14}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(2){border-color:#00E5CF}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(3){border-color:#FF2E93}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(1):has(input:checked){background:#39FF14;box-shadow:0 0 22px #39FF14}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(2):has(input:checked){background:#00E5CF;box-shadow:0 0 22px #00E5CF}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(3):has(input:checked){background:#FF2E93;box-shadow:0 0 22px #FF2E93}
+.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:has(input:checked) p{color:#000 !important}
+/* ── Cocina / Barra: una tarjeta de color por mesa ── */
+.kds-resumen{font-family:'Bungee',cursive;font-size:1.5rem;padding:10px 16px;border:3px solid var(--y);border-radius:14px;margin-bottom:6px;background:#000;color:var(--y)}
+.kds-vacio{font-family:'Bungee',cursive;font-size:1.8rem;padding:40px 16px;text-align:center;border:3px dashed var(--g);border-radius:18px;color:var(--g)}
+.kds-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 16px;border-radius:14px 14px 0 0;border:3px solid #000;margin-top:16px}
+.kds-mesa{font-family:'Bungee',cursive;font-size:2.3rem;line-height:1.05;word-break:break-word}
+.kds-min{font-weight:900;font-size:1.3rem;white-space:nowrap}
+.kds-item{background:#16161f;padding:9px 14px;margin:0;font-size:1.25rem;font-weight:700;color:#fff;border-bottom:1px solid #000}
+.kds-item.preparando{background:#34102a}
+.kds-cant{font-family:'Bungee',cursive;font-size:1.5rem;margin-right:6px}
+.kds-nota{display:block;font-size:1.02rem;color:#FFE600;font-weight:600}
 .stRadio div[role="radiogroup"]{gap:.4rem}
 .stRadio label[data-baseweb="radio"]{background:#111;border:2px solid var(--t);border-radius:999px;padding:5px 14px;margin:0}
 .stRadio label[data-baseweb="radio"]>div:first-child{display:none}
@@ -3301,7 +3342,10 @@ document.getElementById('b').onclick = async () => {{
   }}
 }};
 </script>"""
-    components.html(html, height=56)
+    if hasattr(st, "iframe"):  # versiones nuevas de Streamlit
+        st.iframe(html.strip(), height=56)
+    else:
+        components.html(html, height=56)
 
 
 def acciones_ticket(com, nombre, items, tot, pagos, cli, key):
@@ -3492,6 +3536,263 @@ def form_cuenta_vip(mesas, ocupa):
         _ir_a_cuenta(r)
 
 
+# ─────────────────────────────────────────
+# MAPA VISUAL DEL SALÓN (componente propio: se arma solo, no hace falta ningún archivo extra)
+# ─────────────────────────────────────────
+_MAPA_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:transparent;font-family:'Poppins',system-ui,-apple-system,sans-serif;overflow:hidden}
+#piso{position:relative;width:100%;border-radius:18px;border:3px solid #FFE600;overflow:hidden;background-color:#5b3a22;
+  background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.20) 0 2px,transparent 2px 64px),
+  repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 22px),linear-gradient(180deg,#6e4829,#432816)}
+body.edit #piso{outline:3px dashed #FF2E93;outline-offset:-8px}
+#hint{display:none;position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:50;background:#FF2E93;color:#fff;
+  font-weight:800;font-size:13px;padding:5px 14px;border-radius:999px;pointer-events:none;white-space:nowrap}
+body.edit #hint{display:block}
+.mesa{position:absolute;transform:translate(-50%,-50%) scale(var(--k,1));display:flex;align-items:center;justify-content:center;
+  touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+body.edit .mesa{cursor:grab;touch-action:none}
+.mesa.drag{cursor:grabbing;z-index:40;filter:drop-shadow(0 14px 10px rgba(0,0,0,.55))}
+.cuerpo{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#fff;
+  text-shadow:0 1px 3px rgba(0,0,0,.9);border:4px solid var(--borde);box-shadow:0 6px 0 rgba(0,0,0,.4);padding:3px}
+.cuerpo::after{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--tinte,transparent);pointer-events:none}
+.libre{--borde:#39FF14}
+.ocupada{--borde:#FF2E93;--tinte:rgba(255,46,147,.34)}
+.n,.s,.t{position:relative;z-index:1}
+.n{font-weight:800;font-size:12px;line-height:1.05}
+.s{font-weight:800;font-size:12px;line-height:1.1}
+.libre .s{color:#39FF14}
+.ocupada .s{color:#FFE600;font-size:13px}
+.t{font-size:10px;opacity:.95}
+.barril .cuerpo{width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#d79a58,#9a5d2b 62%,#5f3716);
+  box-shadow:inset 0 0 0 6px #6a3c1b,inset 0 0 0 9px #b9bcc4,inset 0 0 0 11px #4b4d55,0 6px 0 rgba(0,0,0,.4)}
+.chica .cuerpo{width:76px;height:76px;border-radius:16px;background:repeating-linear-gradient(90deg,#dba96b 0 10px,#cf9b5b 10px 11px)}
+.grande .cuerpo{width:200px;height:88px;border-radius:12px;background:repeating-linear-gradient(90deg,#b97a3b 0 14px,#a96d33 14px 15px)}
+.grande .n{font-size:15px}.grande .s{font-size:14px}
+.silla{position:absolute;width:20px;height:20px;border-radius:50%;background:#2c2c36;border:2px solid #0b0b10;box-shadow:0 2px 0 rgba(0,0,0,.4)}
+.vacio{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;text-align:center;padding:20px}
+</style></head><body>
+<div id="piso"><div id="hint">✋ Arrastrá las mesas con el dedo o el mouse</div></div>
+<script>
+let ARGS = null, CUR = {}, ULT_ALTO = 0;
+function post(type, data){ window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*"); }
+function setValue(v){ post("streamlit:setComponentValue", {value: v, dataType: "json"}); }
+window.addEventListener("message", function(e){
+  const d = e.data;
+  if (d && d.type === "streamlit:render"){ ARGS = d.args; draw(); }
+});
+window.addEventListener("resize", function(){ if (ARGS) draw(); });
+post("streamlit:componentReady", {apiVersion: 1});
+
+function sillas(estilo){
+  if (estilo === "chica") return '<span class="silla" style="left:-24px;top:calc(50% - 10px)"></span><span class="silla" style="right:-24px;top:calc(50% - 10px)"></span>';
+  if (estilo === "grande"){
+    let h = "";
+    [16, 50, 84].forEach(function(p){
+      h += '<span class="silla" style="left:calc(' + p + '% - 10px);top:-24px"></span>';
+      h += '<span class="silla" style="left:calc(' + p + '% - 10px);bottom:-24px"></span>';
+    });
+    return h;
+  }
+  return "";
+}
+function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+function draw(){
+  const A = ARGS, piso = document.getElementById("piso");
+  document.body.classList.toggle("edit", !!A.editar);
+  piso.style.height = A.alto + "px";
+  const k = Math.max(0.55, Math.min(1, piso.clientWidth / 1000));
+  piso.querySelectorAll(".mesa,.vacio").forEach(function(n){ n.remove(); });
+  CUR = {};
+  if (!A.mesas.length){
+    const v = document.createElement("div"); v.className = "vacio";
+    v.textContent = "Todavía no hay mesas. Creá las del bar desde “Editar distribución”."; piso.appendChild(v);
+  }
+  A.mesas.forEach(function(m){
+    CUR[m.id] = {x: m.x, y: m.y};
+    const el = document.createElement("div");
+    el.className = "mesa " + m.estilo + " " + (m.ocupada ? "ocupada" : "libre");
+    el.style.left = m.x + "%"; el.style.top = m.y + "%"; el.style.setProperty("--k", k);
+    el.dataset.id = m.id;
+    const estado = m.ocupada ? '<div class="s">' + esc(m.total) + '</div><div class="t">⏱ ' + esc(m.mins) + '′ · 👥 ' + esc(m.pers) + '</div>'
+                             : '<div class="s">LIBRE</div><div class="t">👥 ' + esc(m.cap) + '</div>';
+    el.innerHTML = '<div class="cuerpo">' + sillas(m.estilo) + '<div class="n">' + esc(m.nombre) + '</div>' + estado + '</div>';
+    el.addEventListener("click", function(){
+      if (A.editar || el.dataset.moved === "1") return;
+      setValue({accion: "abrir", mesa_id: m.id, nonce: Date.now()});
+    });
+    el.addEventListener("pointerdown", function(ev){
+      if (!A.editar) return;
+      ev.preventDefault();
+      try { el.setPointerCapture(ev.pointerId); } catch (x) {}
+      const r = piso.getBoundingClientRect();
+      let movido = false;
+      el.classList.add("drag");
+      function mv(e2){
+        movido = true;
+        let x = (e2.clientX - r.left) / r.width * 100, y = (e2.clientY - r.top) / r.height * 100;
+        x = Math.max(4, Math.min(96, Math.round(x))); y = Math.max(6, Math.min(94, Math.round(y)));
+        el.style.left = x + "%"; el.style.top = y + "%"; CUR[m.id] = {x: x, y: y};
+      }
+      function up(){
+        el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+        el.classList.remove("drag");
+        if (movido) setValue({accion: "mover", pos: CUR, nonce: Date.now()});
+      }
+      el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+    });
+    piso.appendChild(el);
+  });
+  if (A.alto + 8 !== ULT_ALTO){ ULT_ALTO = A.alto + 8; post("streamlit:setFrameHeight", {height: ULT_ALTO}); }
+}
+</script></body></html>
+"""
+
+ESTILOS_MESA = {"barril": "🛢️ Barril", "chica": "🪑 Mesa chica (2)", "grande": "🪵 Mesa grande de madera (6)"}
+
+
+@st.cache_resource(show_spinner=False)
+def _mapa_comp():
+    d = Path(tempfile.gettempdir()) / "hopsie_mapa_v1"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "index.html"
+    if not f.exists() or f.read_text(encoding="utf-8") != _MAPA_HTML:
+        f.write_text(_MAPA_HTML, encoding="utf-8")
+    return components.declare_component("hopsie_mapa", path=str(d))
+
+
+def mapa_layout():
+    try:
+        return json.loads(CFG.get("mapa_layout") or "{}")
+    except Exception:
+        return {}
+
+
+def estilo_mesa(m, lay):
+    e = (lay.get(str(m["id"])) or {}).get("e")
+    if e in ESTILOS_MESA:
+        return e
+    n = (m["nombre"] or "").lower()
+    if "barril" in n:
+        return "barril"
+    if "grande" in n or int(m.get("capacidad") or 0) >= 5:
+        return "grande"
+    return "chica"
+
+
+def posiciones_mapa(mesas, lay):
+    """Posición (x%, y%) de cada mesa: la guardada o, si es nueva, un acomodo automático por estilo."""
+    out, cont = {}, defaultdict(int)
+    for m in mesas:
+        e = estilo_mesa(m, lay)
+        k = cont[e]
+        cont[e] += 1
+        pz = lay.get(str(m["id"])) or {}
+        if "x" in pz and "y" in pz:
+            out[m["id"]] = (float(pz["x"]), float(pz["y"]))
+        elif e == "barril":
+            out[m["id"]] = (10 + (k % 6) * 10, 14 + (k // 6) * 14)
+        elif e == "grande":
+            out[m["id"]] = (30 + (k % 3) * 36, 86)
+        else:
+            out[m["id"]] = (9 + (k % 7) * 13, 40 + (k // 7) * 18)
+    return out
+
+
+def procesar_mapa(mesas, ocupa):
+    """Atiende lo que hizo el usuario en el mapa (tocar una mesa / terminar de arrastrar). Va ANTES de dibujar."""
+    ev = st.session_state.get("mapa_salon")
+    if not isinstance(ev, dict) or ev.get("nonce") == st.session_state.get("_mapa_nonce"):
+        return
+    st.session_state["_mapa_nonce"] = ev.get("nonce")
+    if ev.get("accion") == "mover" and usuario_actual():
+        lay = mapa_layout()
+        for mid, pz in (ev.get("pos") or {}).items():
+            lay[str(mid)] = {**(lay.get(str(mid)) or {}), "x": round(float(pz["x"]), 1), "y": round(float(pz["y"]), 1)}
+        cfg_set("mapa_layout", json.dumps(lay))
+    elif ev.get("accion") == "abrir":
+        mid = ev.get("mesa_id")
+        if not any(m["id"] == mid for m in mesas):
+            return
+        com = ocupa.get(mid)
+        if com:
+            st.session_state["cid"] = com["id"]
+            go(P_COMANDA)
+        else:
+            st.session_state["mesa_pend"] = mid
+            st.session_state.pop("nueva_cuenta", None)
+            st.rerun()
+
+
+def crear_mesas_bar():
+    """Crea las mesas del bar que falten: 5 barriles, 11 mesas chicas y 2 mesas grandes."""
+    ex = listar(T_MESAS)
+    nombres = {m["nombre"].lower() for m in ex}
+    orden = max([m["orden"] for m in ex] or [0])
+    lay, n = mapa_layout(), 0
+    for base, cant, cap, zona, est in (("Barril", 5, 4, "Barriles", "barril"), ("Mesa chica", 11, 2, "Salón", "chica"),
+                                       ("Mesa grande", 2, 6, "Salón", "grande")):
+        for i in range(1, cant + 1):
+            nombre = f"{base} {i}"
+            if nombre.lower() in nombres:
+                continue
+            orden += 1
+            r = insertar(T_MESAS, {"nombre": nombre, "zona": zona, "capacidad": cap, "orden": orden})[0]
+            lay[str(r["id"])] = {"e": est}
+            n += 1
+    cfg_set("mapa_layout", json.dumps(lay))
+    log("mesas_bar_creadas", f"{n} mesas (barriles, chicas y grandes)")
+    return n
+
+
+def mapa_salon(mesas, ocupa, por_com, clis):
+    lay = mapa_layout()
+    pos = posiciones_mapa(mesas, lay)
+    editar = False
+    if usuario_actual():
+        editar = st.toggle("✏️ Editar distribución (arrastrá las mesas con el dedo o el mouse)", key="mapa_edit")
+    else:
+        st.caption("Tocá una mesa para abrirla o ver su pedido. Para mover las mesas de lugar, iniciá sesión en ⚙️ Admin.")
+    datos = []
+    for m in mesas:
+        com = ocupa.get(m["id"])
+        x, y = pos[m["id"]]
+        d = {"id": m["id"], "nombre": m["nombre"], "estilo": estilo_mesa(m, lay), "x": x, "y": y,
+             "ocupada": bool(com), "cap": int(m["capacidad"])}
+        if com:
+            d.update(total=peso(totales(com, por_com[com["id"]])["total"]),
+                     mins=int((ahora_utc() - parse_ts(com["abierta_ts"])).total_seconds() // 60), pers=int(com["comensales"] or 1))
+        datos.append(d)
+    _mapa_comp()(mesas=datos, editar=editar, alto=600, key="mapa_salon", default=None)
+    st.caption("🟢 libre · 🟣 ocupada (muestra el total y el tiempo). Barriles 🛢️ · mesas chicas · mesas grandes de madera.")
+    if editar and mesas:
+        with st.expander("🛠️ Estilo de cada mesa y acciones del mapa", expanded=True):
+            sel = st.selectbox("Mesa", mesas, format_func=lambda m: m["nombre"], key="mapa_mesa_sel")
+            actual = estilo_mesa(sel, lay)
+            nuevo = st.radio("Estilo", list(ESTILOS_MESA), index=list(ESTILOS_MESA).index(actual), format_func=ESTILOS_MESA.get,
+                             horizontal=True, key=f"mapa_est_{sel['id']}")
+            if nuevo != actual:
+                lay[str(sel["id"])] = {**(lay.get(str(sel["id"])) or {}), "e": nuevo}
+                cfg_set("mapa_layout", json.dumps(lay))
+                st.rerun()
+            c1, c2 = st.columns(2)
+            if c1.button("🪑 Crear las mesas del bar", key="mapa_crear", **STRETCH):
+                n = crear_mesas_bar()
+                st.toast(f"Se crearon {n} mesas (5 barriles · 11 chicas · 2 grandes, las que faltaban)")
+                st.rerun()
+            if c2.button("↺ Reacomodar todo automático", key="mapa_auto", **STRETCH):
+                cfg_set("mapa_layout", json.dumps({k: {"e": v["e"]} for k, v in lay.items() if v.get("e")}))
+                st.rerun()
+            st.caption("«Crear las mesas del bar» suma las que falten (no toca las que ya tenés). "
+                       "Las que no uses podés desactivarlas o eliminarlas en Admin → Mesas.")
+    elif editar:
+        if st.button("🪑 Crear las mesas del bar (5 barriles · 11 chicas · 2 grandes)", key="mapa_crear0", type="primary", **STRETCH):
+            crear_mesas_bar()
+            st.rerun()
+
+
 def pagina_salon():
     mesas = listar(T_MESAS, order="orden", activa=True)
     abiertas = sorted(listar(T_COM, estado="abierta"), key=lambda c: c["id"])
@@ -3538,6 +3839,7 @@ def pagina_salon():
         st.session_state["nueva_cuenta"] = "vip"
         st.session_state.pop("mesa_pend", None)
 
+    procesar_mapa(mesas, ocupa)
     form_abrir_mesa(mesas, ocupa)
     nc = st.session_state.get("nueva_cuenta")
     if nc == "barra":
@@ -3547,32 +3849,36 @@ def pagina_salon():
 
     if not mesas:
         st.info("Todavía no hay mesas. Cargalas en **Admin → Mesas** (o usá los datos de ejemplo en Admin → Dashboard).")
-    zonas = []
-    for m in mesas:
-        if m["zona"] not in zonas:
-            zonas.append(m["zona"])
-    for zona in zonas:
-        st.markdown(f"### {zona}")
-        lista = [m for m in mesas if m["zona"] == zona]
-        cols = st.columns(4)
-        for idx, m in enumerate(lista):
-            com = ocupa.get(m["id"])
-            with cols[idx % 4]:
-                if com:
-                    st.markdown(html_cuenta(m["nombre"], com, totales(com, por_com[com["id"]]),
-                                            cli=clis.get(com.get("cliente_id"))), unsafe_allow_html=True)
-                    if st.button("Ver / pedir", key=f"mesa_{m['id']}", **STRETCH):
-                        st.session_state["cid"] = com["id"]
-                        go(P_COMANDA)
-                else:
-                    st.markdown(
-                        f'<div class="mesa"><div class="mn">{esc(m["nombre"])}</div>'
-                        f'<div class="mt libre">LIBRE</div><div class="ms">👥 hasta {m["capacidad"]}</div></div>',
-                        unsafe_allow_html=True)
-                    if st.button("Abrir mesa", key=f"mesa_{m['id']}", **STRETCH):
-                        st.session_state["mesa_pend"] = m["id"]
-                        st.session_state.pop("nueva_cuenta", None)
-                        st.rerun()
+    t_mapa, t_lista = st.tabs(["🗺️ Mapa del salón", "📋 Lista de mesas"])
+    with t_mapa:
+        mapa_salon(mesas, ocupa, por_com, clis)
+    with t_lista:
+        zonas = []
+        for m in mesas:
+            if m["zona"] not in zonas:
+                zonas.append(m["zona"])
+        for zona in zonas:
+            st.markdown(f"### {zona}")
+            lista = [m for m in mesas if m["zona"] == zona]
+            cols = st.columns(4)
+            for idx, m in enumerate(lista):
+                com = ocupa.get(m["id"])
+                with cols[idx % 4]:
+                    if com:
+                        st.markdown(html_cuenta(m["nombre"], com, totales(com, por_com[com["id"]]),
+                                                cli=clis.get(com.get("cliente_id"))), unsafe_allow_html=True)
+                        if st.button("Ver / pedir", key=f"mesa_{m['id']}", **STRETCH):
+                            st.session_state["cid"] = com["id"]
+                            go(P_COMANDA)
+                    else:
+                        st.markdown(
+                            f'<div class="mesa"><div class="mn">{esc(m["nombre"])}</div>'
+                            f'<div class="mt libre">LIBRE</div><div class="ms">👥 hasta {m["capacidad"]}</div></div>',
+                            unsafe_allow_html=True)
+                        if st.button("Abrir mesa", key=f"mesa_{m['id']}", **STRETCH):
+                            st.session_state["mesa_pend"] = m["id"]
+                            st.session_state.pop("nueva_cuenta", None)
+                            st.rerun()
 
     if vip:
         st.markdown("### ⭐ Cuentas VIP")
@@ -3852,7 +4158,7 @@ def pagina_cobro():
         st.caption(f"Cada uno: {peso(math.ceil(saldo / n))}")
     monto = st.number_input("Monto a cobrar ahora", 1, int(saldo), int(saldo), 100,
                             key=f"monto_{cid}_{len(pagos)}")
-    metodo = st.radio("Medio", ["💵 Efectivo", "📱 QR / Transferencia", "💳 Tarjeta (posnet)"],
+    metodo = st.radio("¿Cómo paga el cliente?", ["💵 EFECTIVO", "📱 TRANSFERENCIA / QR", "💳 TARJETA"],
                       horizontal=True, key=f"met_{cid}")
     proveedor, ref = None, ""
     if metodo.startswith("💵"):
@@ -3884,42 +4190,71 @@ def pagina_cobro():
 # ─────────────────────────────────────────
 # PÁGINA: COCINA / BARRA
 # ─────────────────────────────────────────
+PALETA_KDS = [("#FFE600", "#000"), ("#00E5CF", "#000"), ("#FF2E93", "#fff"), ("#39FF14", "#000"), ("#FF8A00", "#000"),
+              ("#8B5CF6", "#fff"), ("#3B82F6", "#fff"), ("#EF4444", "#fff"), ("#F472B6", "#000"), ("#22D3EE", "#000")]
+
+
 @autorefresh(15)
-def _cocina_body():
+def _estacion_body(sector):
+    icono = "👨‍🍳" if sector == "Cocina" else "🍺"
     abiertas = {c["id"]: c for c in listar(T_COM, estado="abierta")}
-    if not abiertas:
-        st.info("Sin comandas abiertas.")
-        return
     mesas, clis = mapa_mesas(), mapa_clientes()
-    its = [i for i in items_de(list(abiertas))
-           if i["estado"] in ("pendiente", "preparando") and i.get("confirmado", True)]  # solo pedidos confirmados por la moza
+    its = [i for i in items_de(list(abiertas)) if i["sector"] == sector and i["estado"] in ("pendiente", "preparando")
+           and i.get("confirmado", True)]  # solo pedidos confirmados por la moza
+    if not its:
+        st.markdown(f"<div class='kds-vacio'>{icono} {sector.upper()} · TODO AL DÍA 🎉</div>", unsafe_allow_html=True)
+        return
+    por_com = defaultdict(list)
+    for it in its:
+        por_com[it["comanda_id"]].append(it)
+
+    def desde(i):
+        return parse_ts(i.get("confirmado_ts") or i["ts"])
+
+    orden = sorted(por_com, key=lambda c: min(desde(i) for i in por_com[c]))
+    st.markdown(f"<div class='kds-resumen'>{icono} {sector.upper()} · {len(orden)} mesa(s) · "
+                f"{sum(int(i['cantidad']) for i in its)} ítems por preparar</div>", unsafe_allow_html=True)
     cols = st.columns(2)
-    for col, sec in zip(cols, ["Cocina", "Barra"]):
-        with col:
-            st.markdown(f"### {'👨‍🍳' if sec == 'Cocina' else '🍺'} {sec}")
-            lista = sorted([i for i in its if i["sector"] == sec], key=lambda i: i.get("confirmado_ts") or i["ts"])
-            if not lista:
-                st.caption("Todo al día 🎉")
+    for n, cid in enumerate(orden):
+        com = abiertas[cid]
+        nombre = etiqueta_cuenta(com, mesas, clis)
+        bg, fg = PALETA_KDS[(com.get("mesa_id") or cid) % len(PALETA_KDS)]  # el mismo color para la misma mesa
+        lista = sorted(por_com[cid], key=desde)
+        mins = int((ahora_utc() - min(desde(i) for i in lista)).total_seconds() // 60)
+        with cols[n % 2]:
+            st.markdown(f"<div class='kds-head' style='background:{bg};color:{fg}'><span class='kds-mesa'>{esc(nombre)}</span>"
+                        f"<span class='kds-min'>⏱ {mins}′{' ⚠️' if mins >= 15 else ''}</span></div>", unsafe_allow_html=True)
             for it in lista:
-                nom = etiqueta_cuenta(abiertas[it["comanda_id"]], mesas, clis)
-                mins = int((ahora_utc() - parse_ts(it.get("confirmado_ts") or it["ts"])).total_seconds() // 60)
-                nota = f"<br>📝 {esc(it['nota'])}" if it["nota"] else ""
-                st.markdown(
-                    f"<div class='kds {it['estado']}'><b>{esc(nom)}</b> · {it['cantidad']}× {esc(it['nombre'])}"
-                    f" <small>({mins}′)</small>{nota}</div>", unsafe_allow_html=True)
+                nota = f"<span class='kds-nota'>📝 {esc(it['nota'])}</span>" if it["nota"] else ""
+                bad = " 🔥" if it["estado"] == "preparando" else ""
+                st.markdown(f"<div class='kds-item {it['estado']}' style='border-left:16px solid {bg}'>"
+                            f"<span class='kds-cant' style='color:{bg}'>{it['cantidad']}×</span>{esc(it['nombre'])}{bad}{nota}</div>",
+                            unsafe_allow_html=True)
                 b1, b2 = st.columns(2)
-                if it["estado"] == "pendiente" and b1.button("🔥 Preparar", key=f"pr{it['id']}"):
+                if it["estado"] == "pendiente" and b1.button("🔥 Preparar", key=f"pr{it['id']}", **STRETCH):
                     actualizar(T_ITEMS, it["id"], {"estado": "preparando"})
                     st.rerun()
-                if b2.button("✅ Listo", key=f"ok{it['id']}"):
+                if b2.button("✅ Listo", key=f"ok{it['id']}", type="primary", **STRETCH):
                     actualizar(T_ITEMS, it["id"], {"estado": "servido"})
                     st.rerun()
+            if len(lista) > 1 and st.button("✅ Toda la mesa lista", key=f"all_{sector}_{cid}", **STRETCH):
+                tb(T_ITEMS).update({"estado": "servido"}).in_("id", [i["id"] for i in lista]).execute()
+                st.rerun()
+
+
+def _pagina_estacion(sector):
+    st.markdown(f"### {'👨‍🍳' if sector == 'Cocina' else '🍺'} {sector}")
+    st.caption("Se actualiza solo cada 15 segundos. Solo aparecen los pedidos que la moza confirmó. "
+               "Cada mesa tiene su propio color.")
+    _estacion_body(sector)
 
 
 def pagina_cocina():
-    st.markdown("### 👨‍🍳 Cocina / Barra")
-    st.caption("Se actualiza solo cada 15 segundos. Solo aparecen los pedidos que la moza confirmó.")
-    _cocina_body()
+    _pagina_estacion("Cocina")
+
+
+def pagina_barra():
+    _pagina_estacion("Barra")
 
 
 # ─────────────────────────────────────────
@@ -4134,6 +4469,70 @@ def depurar_auditoria(lim):
     tb(T_LOG).delete().lt("ts", iso(corte)).execute()
     log("auditoria_depurada", f"registros anteriores al {lim:%d/%m/%Y}")
     return True, "Registros de auditoría depurados."
+
+
+def seleccionar_operaciones(modo, lim):
+    """modo 0: cobradas y canceladas anteriores a 'lim' · 1: todas las cerradas · 2: TODAS (incluye abiertas)."""
+    estados = ["pagada", "cancelada"] if modo < 2 else ["pagada", "cancelada", "abierta"]
+    out, ini = [], 0
+    while True:
+        q = tb(T_COM).select("id,estado").in_("estado", estados)
+        if modo == 0:
+            q = q.lt("abierta_ts", iso(datetime(lim.year, lim.month, lim.day, tzinfo=TZ).astimezone(timezone.utc)))
+        r = q.order("id").range(ini, ini + 999).execute().data or []
+        out += r
+        if len(r) < 1000:
+            return out
+        ini += 1000
+
+
+def depurar_operaciones(modo, lim, devolver_stock, confirma):
+    if modo == 2 and (confirma or "").strip().upper() != "RESETEAR":
+        return False, "Escribí RESETEAR para confirmar el reseteo total."
+    coms = seleccionar_operaciones(modo, lim)
+    if not coms:
+        return False, "No hay operaciones para borrar con ese criterio."
+    if devolver_stock:
+        for c in coms:
+            if c["estado"] == "abierta":
+                for it in items_de([c["id"]]):
+                    aplicar_receta(it["producto_id"], -it["cantidad"], c["id"], f"Reseteo comanda #{c['id']}")
+    ids = [c["id"] for c in coms]
+    for k in range(0, len(ids), 80):
+        ch = ids[k:k + 80]
+        tb(T_MOV).update({"comanda_id": None}).in_("comanda_id", ch).execute()
+        tb(T_PAGOS).delete().in_("comanda_id", ch).execute()
+        tb(T_ITEMS).delete().in_("comanda_id", ch).execute()
+        tb(T_COM).delete().in_("id", ch).execute()
+    for k in ("cid", "op_sel", "mesa_pend"):
+        st.session_state.pop(k, None)
+    log("operaciones_depuradas", f"{len(ids)} comandas eliminadas ({['anteriores a ' + lim.strftime('%d/%m/%Y'), 'todas las cerradas', 'RESET TOTAL'][modo]})")
+    return True, f"{len(ids)} operaciones eliminadas."
+
+
+def _panel_reset_operaciones():
+    with st.expander("🧹 Eliminar / resetear operaciones (solo dueños)"):
+        opciones = ["Cobradas y canceladas anteriores a una fecha", "Todas las cobradas y canceladas",
+                    "RESET TOTAL: todo, incluso las cuentas abiertas"]
+        modo = opciones.index(st.radio("¿Qué querés borrar?", opciones, key="rs_modo"))
+        lim = date.today() - timedelta(days=30)
+        if modo == 0:
+            lim = st.date_input("Borrar lo anterior al", value=lim, key="rs_lim")
+        sel = seleccionar_operaciones(modo, lim)
+        cuenta = defaultdict(int)
+        for c in sel:
+            cuenta[c["estado"]] += 1
+        abiertas_n = cuenta["abierta"]
+        extra = f", {abiertas_n} abiertas" if modo == 2 else ""
+        st.info(f"Se borrarían **{len(sel)}** operaciones: {cuenta['pagada']} cobradas, {cuenta['cancelada']} canceladas{extra}.")
+        dev, txt = False, ""
+        if modo == 2:
+            dev = st.checkbox("Devolver al stock lo consumido en las cuentas abiertas", value=True, key="rs_dev")
+            txt = st.text_input("Para confirmar escribí RESETEAR", key="rs_txt")
+        st.caption("Se borran las cuentas con sus consumos y cobros. Cambia el dashboard, las visitas y el consumo de los clientes. "
+                   "El stock de insumos no se modifica (salvo la devolución indicada) y la auditoría queda intacta.")
+        confirmar_eliminar("ops", f"Se eliminan {len(sel)} operaciones para siempre. No se puede deshacer.",
+                           lambda: depurar_operaciones(modo, lim, dev, txt), "Eliminar operaciones")
 
 
 def admin_dashboard():
@@ -4566,6 +4965,8 @@ def admin_apariencia():
 def admin_operaciones():
     st.caption("Corregí cualquier operación del sistema: cuentas abiertas, cobradas o canceladas. "
                "Todo cambio queda registrado en Auditoría con usuario y hora.")
+    if es_dueno():
+        _panel_reset_operaciones()
     f1, f2, f3 = st.columns([2, 2, 3])
     est = f1.selectbox("Estado", ["Todas", "Abiertas", "Cobradas", "Canceladas"], key="op_est")
     per = f2.selectbox("Período", ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Todo"], index=2, key="op_per")
@@ -4932,6 +5333,8 @@ def main_hopsie():
                      "en el SQL Editor de Supabase y recargá la página.")
             st.code(str(e))
             return
+    if st.session_state.get("nav") not in NAV:  # sesión abierta antes de separar Cocina y Barra
+        st.session_state.pop("nav", None)
     if "_goto" in st.session_state:
         st.session_state["nav"] = st.session_state.pop("_goto")
     elif "nav" not in st.session_state:
@@ -4949,7 +5352,7 @@ def main_hopsie():
                 st.rerun()
     st.divider()
     {P_SALON: pagina_salon, P_COMANDA: pagina_comanda, P_COBRO: pagina_cobro,
-     P_COCINA: pagina_cocina, P_ADMIN: pagina_admin}[pagina]()
+     P_COCINA: pagina_cocina, P_BARRA: pagina_barra, P_ADMIN: pagina_admin}[pagina]()
 
 
 # ══════════════════════════════════════════

@@ -2555,6 +2555,14 @@ hr{border-color:var(--p) !important}
 .block-container [class*="st-key-del_"] button *,.block-container [class*="st-key-del_"] [data-testid="stPopoverButton"] *{color:#fff !important;fill:#fff !important}
 .block-container [class*="st-key-del_"] button:hover,.block-container [class*="st-key-del_"] [data-testid="stPopoverButton"]:hover{
   background:#FF1F3D !important;color:#fff !important;-webkit-text-fill-color:#fff !important;border-color:#FFE600 !important}
+/* ── Desplegables (expanders): encabezado oscuro SIEMPRE, no solo al pasar el mouse ── */
+[data-testid="stExpander"] details,[data-testid="stExpander"] details[open]{background:rgba(0,0,0,.35) !important;border:0 !important}
+[data-testid="stExpander"] summary,[data-testid="stExpander"] details>summary,[data-testid="stExpander"] details[open]>summary,
+[data-testid="stExpander"] summary:focus,[data-testid="stExpander"] summary:active{
+  background:#262833 !important;color:#fff !important;-webkit-text-fill-color:#fff !important;border-radius:10px !important;opacity:1 !important}
+[data-testid="stExpander"] summary:hover{background:#34364a !important;color:#fff !important}
+[data-testid="stExpander"] summary *,[data-testid="stExpander"] summary p,[data-testid="stExpander"] summary span,
+[data-testid="stExpander"] summary svg{color:#fff !important;fill:#fff !important;-webkit-text-fill-color:#fff !important;opacity:1 !important;font-weight:800}
 /* cartelito (popover) oscuro, no blanco */
 [data-testid="stPopoverBody"]{background:#12121a !important;border:3px solid var(--p) !important;border-radius:16px !important;color:#fff !important}
 [data-testid="stPopoverBody"] *{color:#fff}

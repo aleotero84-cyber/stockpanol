@@ -112,14 +112,18 @@ MODULOS = [MOD_PANOL, MOD_HOPSIE]
 
 # La barra de módulos se inyecta ANTES de dibujar el selector, así se ve igual en Pañol y en HOPSIE
 MODULE_BAR_CSS = """
-.st-key-app_modulo { margin: 0 0 14px 0; position: relative; z-index: 5; }
-.st-key-app_modulo div[role="radiogroup"] { gap: 10px; flex-wrap: wrap; }
-.st-key-app_modulo label[data-baseweb="radio"] { padding: 9px 22px; margin: 0; cursor: pointer; border-radius: 999px;
-    border: 2px solid var(--accent, var(--t, #1F5FBF)); background: var(--surface, #111); }
-.st-key-app_modulo label[data-baseweb="radio"] > div:first-child { display: none; }
-.st-key-app_modulo label[data-baseweb="radio"] p { color: var(--text, #fff) !important; font-weight: 700; font-size: 15px; }
-.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) { background: var(--accent, var(--y, #FFE600)); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
-.st-key-app_modulo label[data-baseweb="radio"]:has(input:checked) p { color: var(--on-accent, #000) !important; }
+.block-container [class*="st-key-nav_mod"] button{min-height:3rem !important;border-radius:999px !important;padding:.4rem 1.4rem !important;
+  background:rgba(127,127,127,.14) !important;-webkit-backdrop-filter:blur(12px) saturate(160%);backdrop-filter:blur(12px) saturate(160%);
+  border:2px solid var(--accent, #00E5CF) !important;box-shadow:0 6px 18px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.35) !important;}
+.block-container [class*="st-key-nav_mod"] button p{font-size:1.1rem !important;font-weight:800 !important;color:var(--text, #fff) !important}
+.block-container [class*="st-key-nav_mod"] button[kind="primary"]{background:var(--accent, linear-gradient(135deg,#FF2E93,#FF8A00)) !important;
+  box-shadow:0 0 22px rgba(255,46,147,.45), inset 0 1px 0 rgba(255,255,255,.45) !important}
+.block-container [class*="st-key-nav_mod"] button[kind="primary"] p{color:var(--on-accent, #fff) !important}
+@media (max-width:640px){
+  .st-key-modbar [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important;gap:8px !important}
+  .st-key-modbar [data-testid="stColumn"]{flex:1 1 calc(50% - 8px) !important;min-width:calc(50% - 8px) !important}
+  .st-key-modbar [data-testid="stColumn"]:nth-child(3){display:none !important}
+}
 """
 
 if "app_modulo" not in st.session_state:  # primer ingreso: respeta  ?modulo=hopsie
@@ -2326,6 +2330,25 @@ PROV_COLOR = {s: c for s, _, c in PROVEEDORES}
 _V = tuple(int(x) for x in st.__version__.split(".")[:2] if x.isdigit())
 STRETCH = {"width": "stretch"} if _V >= (1, 50) else {"use_container_width": True}
 ICON_DEL = {"icon": ":material/delete:"} if _V >= (1, 40) else {}
+ICON_OK = _V >= (1, 40)
+ICONOS_IB = {"menos": (":material/remove:", "−"), "mas": (":material/add:", "+"),
+             "borrar": (":material/delete:", "🗑"), "editar": (":material/edit:", "✎")}
+
+
+def ib(kind, key, ayuda=""):
+    """Botón cuadrado solo con ícono (se ve igual en PC y celular)."""
+    ic, fb = ICONOS_IB[kind]
+    if ICON_OK:
+        return st.button("", icon=ic, key=f"ib_{kind}_{key}", help=ayuda or None)
+    return st.button(fb, key=f"ib_{kind}_{key}", help=ayuda or None)
+
+
+def ib_popover(kind, key, ayuda=""):
+    ic, fb = ICONOS_IB[kind]
+    if ICON_OK:
+        with st.container(key=f"ib_{kind}_{key}"):
+            return st.popover("", icon=ic, help=ayuda or None)
+    return st.popover(fb, help=ayuda or None)
 
 # ─────────────────────────────────────────
 # ESTILO (fondo loquísimo: amarillo · turquesa · rosa · negro · verde)
@@ -2399,21 +2422,69 @@ div[data-baseweb="popover"] *{color:#fff}
 .block-container [data-testid="stBaseButton-primary"] p,.block-container [data-testid="stBaseButton-primaryFormSubmit"] p{font-size:1.2rem !important}
 .block-container input,.block-container textarea{font-size:1.08rem !important}
 [data-testid="stMetricValue"]{font-size:2.1rem !important;font-weight:800}
-.st-key-nav label[data-baseweb="radio"]{padding:10px 22px !important;border-width:3px !important}
-.st-key-nav label[data-baseweb="radio"] p{font-size:1.12rem !important;font-weight:800 !important}
 /* ── Cobro: medios de pago como botones grandes ── */
-.block-container [class*="st-key-met_"] [data-testid="stWidgetLabel"] p{font-size:1.4rem !important;font-weight:900 !important;color:var(--y) !important;text-transform:uppercase;letter-spacing:.6px}
-.block-container [class*="st-key-met_"] div[role="radiogroup"]{gap:14px;flex-wrap:wrap;width:100%}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]{flex:1 1 220px;min-height:96px;justify-content:center;align-items:center;
-  border-radius:20px;border-width:4px;padding:10px 14px;background:#0d0d12;box-shadow:5px 5px 0 rgba(255,255,255,.2)}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"] p{font-size:1.55rem !important;font-weight:900 !important;color:#fff !important;text-align:center;line-height:1.1}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(1){border-color:#39FF14}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(2){border-color:#00E5CF}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(3){border-color:#FF2E93}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(1):has(input:checked){background:#39FF14;box-shadow:0 0 22px #39FF14}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(2):has(input:checked){background:#00E5CF;box-shadow:0 0 22px #00E5CF}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:nth-of-type(3):has(input:checked){background:#FF2E93;box-shadow:0 0 22px #FF2E93}
-.block-container [class*="st-key-met_"] label[data-baseweb="radio"]:has(input:checked) p{color:#000 !important}
+/* ── Cobro v2: tres botones enormes, banner del medio elegido y panel de confirmación ── */
+.cobro-titulo{font-family:'Bungee',cursive;font-size:1.7rem;color:var(--y);margin:10px 0 6px;text-transform:uppercase}
+.cobro-sel{border:4px solid #000;border-radius:18px;padding:14px 18px;margin:14px 0;font-family:'Bungee',cursive;font-size:1.7rem;text-align:center;color:#000 !important}
+.cobro-conf{background:#000;border:5px solid var(--y);border-radius:22px;padding:18px 20px;margin:14px 0;text-align:center;color:#fff}
+.cobro-conf .c1{font-family:'Bungee',cursive;font-size:1.5rem;color:var(--y)}
+.cobro-conf .c2{font-family:'Bungee',cursive;font-size:3.2rem;line-height:1.1;color:#fff}
+.cobro-conf .c3{font-size:1.5rem;font-weight:800;margin-top:6px}
+.cobro-conf .c4{font-size:1.1rem;opacity:.9;margin-top:4px}
+/* ── Vidrio esmerilado (blur): menú principal, medios de cobro y botones con ícono ── */
+.block-container [class*="st-key-nav_"] button{min-height:3.6rem !important;border-radius:18px !important;padding:.5rem .6rem !important;
+  background:linear-gradient(135deg,rgba(0,229,207,.22),rgba(255,255,255,.06)) !important;
+  -webkit-backdrop-filter:blur(14px) saturate(170%);backdrop-filter:blur(14px) saturate(170%);
+  border:2px solid rgba(0,229,207,.8) !important;box-shadow:0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.35) !important}
+.block-container [class*="st-key-nav_"] button p{font-size:1.12rem !important;font-weight:800 !important;color:#fff !important;white-space:nowrap !important}
+.block-container [class*="st-key-nav_"] button:hover{background:linear-gradient(135deg,rgba(255,230,0,.4),rgba(255,255,255,.12)) !important;
+  transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,229,207,.4), inset 0 1px 0 rgba(255,255,255,.5) !important;color:#fff !important}
+.block-container [class*="st-key-nav_"] button:hover p{color:#fff !important}
+.block-container [class*="st-key-nav_"] button[kind="primary"]{background:linear-gradient(135deg,rgba(255,46,147,.85),rgba(255,138,0,.8)) !important;
+  border-color:rgba(255,230,0,.95) !important;box-shadow:0 0 26px rgba(255,46,147,.55), inset 0 1px 0 rgba(255,255,255,.5) !important}
+.block-container [class*="st-key-nav_"] button p{text-transform:none !important}
+@media (max-width:640px){
+  .st-key-navbar [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important;gap:8px !important}
+  .st-key-navbar [data-testid="stColumn"]{flex:1 1 calc(33% - 8px) !important;min-width:calc(33% - 8px) !important}
+  .st-key-navbar button p{font-size:.95rem !important;white-space:normal !important}
+}
+.block-container [class*="st-key-cmb_"] button{min-height:8.5rem !important;border-radius:26px !important;border-width:3px !important;white-space:normal;
+  -webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);
+  box-shadow:0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.4) !important}
+.block-container [class*="st-key-cmb_"] button p{font-size:1.7rem !important;font-weight:900 !important;line-height:1.1;color:#fff !important;
+  white-space:normal !important;overflow:visible !important;text-overflow:clip !important}
+.block-container [class*="st-key-cmb_"][class*="_efectivo"] button{background:linear-gradient(135deg,rgba(57,255,20,.28),rgba(255,255,255,.05)) !important;border-color:#39FF14 !important}
+.block-container [class*="st-key-cmb_"][class*="_qr"] button{background:linear-gradient(135deg,rgba(0,229,207,.28),rgba(255,255,255,.05)) !important;border-color:#00E5CF !important}
+.block-container [class*="st-key-cmb_"][class*="_tarjeta"] button{background:linear-gradient(135deg,rgba(255,46,147,.30),rgba(255,255,255,.05)) !important;border-color:#FF2E93 !important}
+.block-container [class*="st-key-cmb_"][class*="_efectivo"] button[kind="primary"]{background:linear-gradient(135deg,#39FF14,#B6FF8A) !important;box-shadow:0 0 34px #39FF14 !important}
+.block-container [class*="st-key-cmb_"][class*="_qr"] button[kind="primary"]{background:linear-gradient(135deg,#00E5CF,#9CFFF4) !important;box-shadow:0 0 34px #00E5CF !important}
+.block-container [class*="st-key-cmb_"][class*="_tarjeta"] button[kind="primary"]{background:linear-gradient(135deg,#FF2E93,#FF9BC8) !important;box-shadow:0 0 34px #FF2E93 !important}
+.block-container [class*="st-key-cmb_"] button[kind="primary"] p{color:#000 !important}
+.block-container [class*="st-key-cmb_"] button:hover{transform:translateY(-3px)}
+/* botones solo con ícono: menos, más, editar, borrar */
+.block-container [class*="st-key-ib_"] button,.block-container [class*="st-key-ib_"] [data-testid="stPopoverButton"]{
+  min-width:3.1rem !important;min-height:3.1rem !important;padding:.3rem !important;border-radius:16px !important;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,rgba(255,255,255,.16),rgba(255,255,255,.05)) !important;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border:2px solid rgba(0,229,207,.85) !important;color:#fff !important;box-shadow:0 5px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.35) !important}
+.block-container [class*="st-key-ib_"] [data-testid="stIconMaterial"],.block-container [class*="st-key-ib_"] button span{font-size:1.9rem !important;color:#fff !important;opacity:1 !important}
+.block-container [class*="st-key-ib_"] button:hover,.block-container [class*="st-key-ib_"] [data-testid="stPopoverButton"]:hover{background:var(--y) !important;transform:translateY(-2px)}
+.block-container [class*="st-key-ib_"] button:hover span,.block-container [class*="st-key-ib_"] [data-testid="stPopoverButton"]:hover span{color:#000 !important}
+.block-container [class*="st-key-ib_borrar"] button{border-color:#FF4D6D !important;background:linear-gradient(135deg,rgba(255,46,61,.35),rgba(255,255,255,.04)) !important}
+.block-container [class*="st-key-ib_borrar"] button span{color:#FF9AAE !important}
+.block-container [class*="st-key-ib_"] [data-testid="stPopoverButton"] > div > div[aria-hidden="true"]{display:none !important}
+.block-container [class*="st-key-ib_mas"] button{border-color:#39FF14 !important}
+.block-container [class*="st-key-ib_mas"] button span{color:#9BFF8A !important}
+/* ── Dashboard ── */
+.dcard{border:3px solid;border-radius:18px;overflow:hidden;background:rgba(255,255,255,.05);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);margin-bottom:10px}
+.dcard .dh{font-family:'Bungee',cursive;font-size:1.5rem;padding:8px 16px;color:#000}
+.dgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 16px}
+.dgrid div{background:rgba(0,0,0,.38);border-radius:12px;padding:8px 12px}
+.dgrid b{display:block;font-size:1.8rem;line-height:1.1;color:#fff}
+.dgrid span{font-size:.95rem;opacity:.85;color:#fff}
+.dbar{height:10px;background:rgba(255,255,255,.14);margin:0 16px 4px;border-radius:99px;overflow:hidden}
+.dbar i{display:block;height:100%}
+.dpct{padding:0 16px 12px;font-size:.95rem;opacity:.9;color:#fff}
+.dtot{border:3px dashed var(--y);border-radius:14px;padding:10px 16px;margin:6px 0 14px;color:#fff;font-size:1.1rem}
 /* ── Cocina / Barra: una tarjeta de color por mesa ── */
 .kds-resumen{font-family:'Bungee',cursive;font-size:1.5rem;padding:10px 16px;border:3px solid var(--y);border-radius:14px;margin-bottom:6px;background:#000;color:var(--y)}
 .kds-vacio{font-family:'Bungee',cursive;font-size:1.8rem;padding:40px 16px;text-align:center;border:3px dashed var(--g);border-radius:18px;color:var(--g)}
@@ -2742,7 +2813,7 @@ def anular_item(item):
 
 def anular_comanda(com, motivo):
     for it in items_de([com["id"]]):
-        aplicar_receta(it["producto_id"], -it["cantidad"], com["id"], f"Comanda anulada #{com['id']}")
+        aplicar_receta(it.get("producto_id"), -it["cantidad"], com["id"], f"Comanda anulada #{com['id']}")
     actualizar(T_COM, com["id"], {"estado": "cancelada", "cerrada_ts": iso(ahora_utc()), "nota": motivo})
     log("comanda_anulada", f"comanda {com['id']} · {motivo}")
 
@@ -2892,7 +2963,7 @@ def hop_editar_item(it, cant=None, precio=None, nota=None, nombre=None, tocar_st
         cambios["cantidad"] = int(cant)
         partes.append(f"cantidad {it['cantidad']} → {int(cant)}")
         if tocar_stock:
-            aplicar_receta(it["producto_id"], delta, it["comanda_id"], f"Edición comanda #{it['comanda_id']}")
+            aplicar_receta(it.get("producto_id"), delta, it["comanda_id"], f"Edición comanda #{it['comanda_id']}")
     if precio is not None and not _igual(precio, it["precio_unit"]):
         cambios["precio_unit"] = float(precio)
         partes.append(f"precio {peso(it['precio_unit'])} → {peso(precio)}")
@@ -2912,7 +2983,7 @@ def set_anulado(it, anular, estado_comanda):
     """Anula / restaura un ítem. En comandas canceladas el stock ya fue devuelto, así que no se toca."""
     actualizar(T_ITEMS, it["id"], {"anulado": bool(anular)})
     if estado_comanda != "cancelada":
-        aplicar_receta(it["producto_id"], -it["cantidad"] if anular else it["cantidad"], it["comanda_id"],
+        aplicar_receta(it.get("producto_id"), -it["cantidad"] if anular else it["cantidad"], it["comanda_id"],
                        ("Anulación" if anular else "Restauración") + f" comanda #{it['comanda_id']}")
     log("item_anulado" if anular else "item_restaurado", f"comanda {it['comanda_id']} · {it['cantidad']}× {it['nombre']}")
 
@@ -3537,19 +3608,25 @@ def form_cuenta_vip(mesas, ocupa):
 
 
 # ─────────────────────────────────────────
-# MAPA VISUAL DEL SALÓN (componente propio: se arma solo, no hace falta ningún archivo extra)
+# MAPA VISUAL DEL BAR: plano general + Salón / Galería / Patio (componente propio, sin archivos extra)
 # ─────────────────────────────────────────
 _MAPA_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:transparent;font-family:'Poppins',system-ui,-apple-system,sans-serif;overflow:hidden}
-#piso{position:relative;width:100%;border-radius:18px;border:3px solid #FFE600;overflow:hidden;background-color:#5b3a22;
-  background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.20) 0 2px,transparent 2px 64px),
-  repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 22px),linear-gradient(180deg,#6e4829,#432816)}
+#piso{position:relative;width:100%;border-radius:18px;overflow:hidden;background:#1a1a22;border:3px solid #FFE600}
 body.edit #piso{outline:3px dashed #FF2E93;outline-offset:-8px}
-#hint{display:none;position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:50;background:#FF2E93;color:#fff;
+#hint{display:none;position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:60;background:#FF2E93;color:#fff;
   font-weight:800;font-size:13px;padding:5px 14px;border-radius:999px;pointer-events:none;white-space:nowrap}
 body.edit #hint{display:block}
+.zona{position:absolute;border-radius:16px;overflow:hidden;border:3px solid var(--zc,#FFE600);box-shadow:inset 0 0 40px rgba(0,0,0,.35)}
+.z-salon{--zc:#FFB347;background-color:#5b3a22;background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.20) 0 2px,transparent 2px 64px),
+  repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 22px),linear-gradient(180deg,#6e4829,#432816)}
+.z-galeria{--zc:#FF7A59;background-color:#8f4f33;background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.16) 0 2px,transparent 2px 72px),
+  repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 2px,transparent 2px 72px),linear-gradient(135deg,#b9754d,#8a4a30)}
+.z-patio{--zc:#7CFF6B;background-color:#2f5a33;background-image:radial-gradient(rgba(255,255,255,.10) 2px,transparent 3px),linear-gradient(180deg,#46763f,#2b4d2d);background-size:30px 30px,100% 100%}
+.zlab{position:absolute;left:10px;top:8px;z-index:30;background:rgba(0,0,0,.62);color:#fff;font-weight:800;font-size:13px;padding:4px 12px;border-radius:999px;
+  border:2px solid var(--zc);pointer-events:none;white-space:nowrap}
 .mesa{position:absolute;transform:translate(-50%,-50%) scale(var(--k,1));display:flex;align-items:center;justify-content:center;
   touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 body.edit .mesa{cursor:grab;touch-action:none}
@@ -3560,20 +3637,23 @@ body.edit .mesa{cursor:grab;touch-action:none}
 .libre{--borde:#39FF14}
 .ocupada{--borde:#FF2E93;--tinte:rgba(255,46,147,.34)}
 .n,.s,.t{position:relative;z-index:1}
-.n{font-weight:800;font-size:12px;line-height:1.05}
-.s{font-weight:800;font-size:12px;line-height:1.1}
+.n{font-weight:800;font-size:13px;line-height:1.05}
+.s{font-weight:800;font-size:13px;line-height:1.1}
 .libre .s{color:#39FF14}
-.ocupada .s{color:#FFE600;font-size:13px}
+.ocupada .s{color:#FFE600;font-size:14px}
 .t{font-size:10px;opacity:.95}
+.mesa.sel .cuerpo{outline:5px dashed #FF2E3D;outline-offset:5px}
+.mesa.sel::before{content:"✓";position:absolute;right:-12px;top:-14px;z-index:50;width:30px;height:30px;border-radius:50%;background:#FF2E3D;color:#fff;
+  font-weight:900;font-size:18px;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
 .barril .cuerpo{width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#d79a58,#9a5d2b 62%,#5f3716);
   box-shadow:inset 0 0 0 6px #6a3c1b,inset 0 0 0 9px #b9bcc4,inset 0 0 0 11px #4b4d55,0 6px 0 rgba(0,0,0,.4)}
 .chica .cuerpo{width:76px;height:76px;border-radius:16px;background:repeating-linear-gradient(90deg,#dba96b 0 10px,#cf9b5b 10px 11px)}
 .grande .cuerpo{width:200px;height:88px;border-radius:12px;background:repeating-linear-gradient(90deg,#b97a3b 0 14px,#a96d33 14px 15px)}
 .grande .n{font-size:15px}.grande .s{font-size:14px}
 .silla{position:absolute;width:20px;height:20px;border-radius:50%;background:#2c2c36;border:2px solid #0b0b10;box-shadow:0 2px 0 rgba(0,0,0,.4)}
-.vacio{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;text-align:center;padding:20px}
+.vacio{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;text-align:center;padding:20px;z-index:20}
 </style></head><body>
-<div id="piso"><div id="hint">✋ Arrastrá las mesas con el dedo o el mouse</div></div>
+<div id="piso"><div id="hint">✋ Arrastrá para mover · tocá para seleccionar</div></div>
 <script>
 let ARGS = null, CUR = {}, ULT_ALTO = 0;
 function post(type, data){ window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*"); }
@@ -3603,64 +3683,88 @@ function draw(){
   const A = ARGS, piso = document.getElementById("piso");
   document.body.classList.toggle("edit", !!A.editar);
   piso.style.height = A.alto + "px";
-  const k = Math.max(0.55, Math.min(1, piso.clientWidth / 1000));
-  piso.querySelectorAll(".mesa,.vacio").forEach(function(n){ n.remove(); });
+  piso.querySelectorAll(".zona,.vacio").forEach(function(n){ n.remove(); });
   CUR = {};
-  if (!A.mesas.length){
-    const v = document.createElement("div"); v.className = "vacio";
-    v.textContent = "Todavía no hay mesas. Creá las del bar desde “Editar distribución”."; piso.appendChild(v);
-  }
-  A.mesas.forEach(function(m){
-    CUR[m.id] = {x: m.x, y: m.y};
-    const el = document.createElement("div");
-    el.className = "mesa " + m.estilo + " " + (m.ocupada ? "ocupada" : "libre");
-    el.style.left = m.x + "%"; el.style.top = m.y + "%"; el.style.setProperty("--k", k);
-    el.dataset.id = m.id;
-    const estado = m.ocupada ? '<div class="s">' + esc(m.total) + '</div><div class="t">⏱ ' + esc(m.mins) + '′ · 👥 ' + esc(m.pers) + '</div>'
-                             : '<div class="s">LIBRE</div><div class="t">👥 ' + esc(m.cap) + '</div>';
-    el.innerHTML = '<div class="cuerpo">' + sillas(m.estilo) + '<div class="n">' + esc(m.nombre) + '</div>' + estado + '</div>';
-    el.addEventListener("click", function(){
-      if (A.editar || el.dataset.moved === "1") return;
-      setValue({accion: "abrir", mesa_id: m.id, nonce: Date.now()});
+  const SEL = new Set(A.sel || []);
+  const ref = A.zonas.length > 1 ? 760 : 520;
+  let total = 0;
+  A.zonas.forEach(function(z){
+    const zd = document.createElement("div");
+    zd.className = "zona z-" + z.id;
+    zd.style.left = "calc(" + z.x + "% + 5px)"; zd.style.top = "calc(" + z.y + "% + 5px)";
+    zd.style.width = "calc(" + z.w + "% - 10px)"; zd.style.height = "calc(" + z.h + "% - 10px)";
+    zd.innerHTML = '<div class="zlab">' + esc(z.emoji) + ' ' + esc(z.nombre.toUpperCase()) + ' · ' + z.ocupadas + '/' + z.total + ' ocupadas</div>';
+    piso.appendChild(zd);
+    const zw = zd.clientWidth || (piso.clientWidth * z.w / 100 - 10);
+    const k = Math.max(0.5, Math.min(1, zw / ref));
+    A.mesas.filter(function(m){ return m.zona === z.id; }).forEach(function(m){
+      total++;
+      CUR[m.id] = {x: m.x, y: m.y};
+      const el = document.createElement("div");
+      el.className = "mesa " + m.estilo + " " + (m.ocupada ? "ocupada" : "libre") + (SEL.has(m.id) ? " sel" : "");
+      el.style.left = m.x + "%"; el.style.top = m.y + "%"; el.style.setProperty("--k", k);
+      const estado = m.ocupada ? '<div class="s">' + esc(m.total) + '</div><div class="t">⏱ ' + esc(m.mins) + '′ · 👥 ' + esc(m.pers) + '</div>'
+                               : '<div class="s">LIBRE</div><div class="t">👥 ' + esc(m.cap) + '</div>';
+      el.innerHTML = '<div class="cuerpo">' + sillas(m.estilo) + '<div class="n">' + esc(m.nombre) + '</div>' + estado + '</div>';
+      el.addEventListener("click", function(){
+        if (A.editar || el.dataset.moved === "1") return;
+        setValue({accion: "abrir", mesa_id: m.id, nonce: Date.now()});
+      });
+      el.addEventListener("pointerdown", function(ev){
+        if (!A.editar) return;
+        ev.preventDefault();
+        try { el.setPointerCapture(ev.pointerId); } catch (x) {}
+        const r = zd.getBoundingClientRect();
+        const x0 = ev.clientX, y0 = ev.clientY;
+        let movido = false;
+        function mv(e2){
+          if (!movido && Math.abs(e2.clientX - x0) + Math.abs(e2.clientY - y0) < 6) return;
+          movido = true; el.classList.add("drag");
+          let x = (e2.clientX - r.left) / r.width * 100, y = (e2.clientY - r.top) / r.height * 100;
+          x = Math.max(4, Math.min(96, Math.round(x))); y = Math.max(8, Math.min(94, Math.round(y)));
+          el.style.left = x + "%"; el.style.top = y + "%"; CUR[m.id] = {x: x, y: y};
+        }
+        function up(){
+          el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+          el.classList.remove("drag");
+          if (movido) setValue({accion: "mover", pos: CUR, nonce: Date.now()});
+          else setValue({accion: "toggle", mesa_id: m.id, nonce: Date.now()});
+        }
+        el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+      });
+      zd.appendChild(el);
     });
-    el.addEventListener("pointerdown", function(ev){
-      if (!A.editar) return;
-      ev.preventDefault();
-      try { el.setPointerCapture(ev.pointerId); } catch (x) {}
-      const r = piso.getBoundingClientRect();
-      let movido = false;
-      el.classList.add("drag");
-      function mv(e2){
-        movido = true;
-        let x = (e2.clientX - r.left) / r.width * 100, y = (e2.clientY - r.top) / r.height * 100;
-        x = Math.max(4, Math.min(96, Math.round(x))); y = Math.max(6, Math.min(94, Math.round(y)));
-        el.style.left = x + "%"; el.style.top = y + "%"; CUR[m.id] = {x: x, y: y};
-      }
-      function up(){
-        el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
-        el.classList.remove("drag");
-        if (movido) setValue({accion: "mover", pos: CUR, nonce: Date.now()});
-      }
-      el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
-    });
-    piso.appendChild(el);
   });
+  if (!total){
+    const v = document.createElement("div"); v.className = "vacio";
+    v.textContent = "No hay mesas en esta zona. Agregalas desde “Editar distribución”."; piso.appendChild(v);
+  }
   if (A.alto + 8 !== ULT_ALTO){ ULT_ALTO = A.alto + 8; post("streamlit:setFrameHeight", {height: ULT_ALTO}); }
 }
 </script></body></html>
 """
 
 ESTILOS_MESA = {"barril": "🛢️ Barril", "chica": "🪑 Mesa chica (2)", "grande": "🪵 Mesa grande de madera (6)"}
+ZONAS_MAPA = [("salon", "Salón", "🏠"), ("galeria", "Galería", "🌿"), ("patio", "Patio", "🌳")]
+NOMBRE_ZONA = {k: n for k, n, _ in ZONAS_MAPA}
+BASE_ESTILO = {"barril": ("Barril", 4), "chica": ("Mesa chica", 2), "grande": ("Mesa grande", 6)}
 
 
 @st.cache_resource(show_spinner=False)
 def _mapa_comp():
-    d = Path(tempfile.gettempdir()) / "hopsie_mapa_v1"
+    d = Path(tempfile.gettempdir()) / "hopsie_mapa_v2"
     d.mkdir(parents=True, exist_ok=True)
     f = d / "index.html"
     if not f.exists() or f.read_text(encoding="utf-8") != _MAPA_HTML:
         f.write_text(_MAPA_HTML, encoding="utf-8")
-    return components.declare_component("hopsie_mapa", path=str(d))
+    return components.declare_component("hopsie_mapa_v2", path=str(d))
+
+
+def _i(v, d=0):
+    try:
+        return int(v)
+    except Exception:
+        return d
 
 
 def mapa_layout():
@@ -3670,49 +3774,64 @@ def mapa_layout():
         return {}
 
 
+def zona_mapa(m):
+    z = (m.get("zona") or "").lower()
+    if "gal" in z:
+        return "galeria"
+    if "pat" in z or "vereda" in z or "exterior" in z:
+        return "patio"
+    return "salon"
+
+
 def estilo_mesa(m, lay):
     e = (lay.get(str(m["id"])) or {}).get("e")
     if e in ESTILOS_MESA:
         return e
-    n = (m["nombre"] or "").lower()
+    n = (m.get("nombre") or "").lower()
     if "barril" in n:
         return "barril"
-    if "grande" in n or int(m.get("capacidad") or 0) >= 5:
+    if "grande" in n or _i(m.get("capacidad")) >= 5:
         return "grande"
     return "chica"
 
 
 def posiciones_mapa(mesas, lay):
-    """Posición (x%, y%) de cada mesa: la guardada o, si es nueva, un acomodo automático por estilo."""
+    """Posición (x%, y%) dentro de su zona: la guardada o, si es nueva, un acomodo automático por estilo."""
     out, cont = {}, defaultdict(int)
     for m in mesas:
-        e = estilo_mesa(m, lay)
-        k = cont[e]
-        cont[e] += 1
+        e, z = estilo_mesa(m, lay), zona_mapa(m)
+        k = cont[(z, e)]
+        cont[(z, e)] += 1
         pz = lay.get(str(m["id"])) or {}
         if "x" in pz and "y" in pz:
             out[m["id"]] = (float(pz["x"]), float(pz["y"]))
         elif e == "barril":
-            out[m["id"]] = (10 + (k % 6) * 10, 14 + (k // 6) * 14)
+            out[m["id"]] = (11 + (k % 6) * 14, 24 + (k // 6) * 22)
         elif e == "grande":
-            out[m["id"]] = (30 + (k % 3) * 36, 86)
+            out[m["id"]] = (30 + (k % 2) * 42, 82 - (k // 2) * 24)
         else:
-            out[m["id"]] = (9 + (k % 7) * 13, 40 + (k // 7) * 18)
+            out[m["id"]] = (11 + (k % 6) * 15, 48 + (k // 6) * 20)
     return out
 
 
 def procesar_mapa(mesas, ocupa):
-    """Atiende lo que hizo el usuario en el mapa (tocar una mesa / terminar de arrastrar). Va ANTES de dibujar."""
+    """Atiende lo que hizo el usuario en el mapa (tocar / arrastrar / seleccionar). Va ANTES de dibujar."""
     ev = st.session_state.get("mapa_salon")
     if not isinstance(ev, dict) or ev.get("nonce") == st.session_state.get("_mapa_nonce"):
         return
     st.session_state["_mapa_nonce"] = ev.get("nonce")
-    if ev.get("accion") == "mover" and usuario_actual():
+    accion = ev.get("accion")
+    if accion == "mover" and usuario_actual():
         lay = mapa_layout()
         for mid, pz in (ev.get("pos") or {}).items():
             lay[str(mid)] = {**(lay.get(str(mid)) or {}), "x": round(float(pz["x"]), 1), "y": round(float(pz["y"]), 1)}
         cfg_set("mapa_layout", json.dumps(lay))
-    elif ev.get("accion") == "abrir":
+    elif accion == "toggle" and usuario_actual():
+        cur = list(st.session_state.get("mapa_sel_ms", []))
+        mid = ev.get("mesa_id")
+        cur = [x for x in cur if x != mid] if mid in cur else cur + [mid]
+        st.session_state["mapa_sel_ms"] = cur
+    elif accion == "abrir":
         mid = ev.get("mesa_id")
         if not any(m["id"] == mid for m in mesas):
             return
@@ -3726,70 +3845,190 @@ def procesar_mapa(mesas, ocupa):
             st.rerun()
 
 
-def crear_mesas_bar():
-    """Crea las mesas del bar que falten: 5 barriles, 11 mesas chicas y 2 mesas grandes."""
+def _crear_mesa(nombre, zona_id, estilo, lay, orden):
+    """Crea una mesa y le guarda estilo y zona. Devuelve None si salió bien o el texto del error."""
+    try:
+        r = insertar(T_MESAS, {"nombre": nombre, "zona": NOMBRE_ZONA[zona_id], "capacidad": BASE_ESTILO[estilo][1], "orden": orden})
+        lay[str(r[0]["id"])] = {"e": estilo}
+        return None
+    except Exception as e:
+        return f"{nombre}: {e}"
+
+
+def agregar_mesas(estilo, cantidad, zona_id):
+    """Suma 'cantidad' mesas del estilo elegido a una zona, siguiendo la numeración (Barril 6, Barril 7…)."""
     ex = listar(T_MESAS)
-    nombres = {m["nombre"].lower() for m in ex}
-    orden = max([m["orden"] for m in ex] or [0])
-    lay, n = mapa_layout(), 0
-    for base, cant, cap, zona, est in (("Barril", 5, 4, "Barriles", "barril"), ("Mesa chica", 11, 2, "Salón", "chica"),
-                                       ("Mesa grande", 2, 6, "Salón", "grande")):
+    nombres = {(m["nombre"] or "").lower() for m in ex}
+    orden = max([_i(m.get("orden")) for m in ex] or [0])
+    lay, base, n, hechas, errores = mapa_layout(), BASE_ESTILO[estilo][0], 1, 0, []
+    for _ in range(int(cantidad)):
+        while f"{base} {n}".lower() in nombres:
+            n += 1
+        orden += 1
+        err = _crear_mesa(f"{base} {n}", zona_id, estilo, lay, orden)
+        nombres.add(f"{base} {n}".lower())
+        if err:
+            errores.append(err)
+        else:
+            hechas += 1
+    cfg_set("mapa_layout", json.dumps(lay))
+    log("mesas_agregadas", f"{hechas} × {base} en {NOMBRE_ZONA[zona_id]}")
+    return hechas, errores
+
+
+def crear_mesas_bar(zona_id):
+    """Crea las mesas del bar que falten: 5 barriles, 11 mesas chicas y 2 mesas grandes (todas en la zona elegida)."""
+    ex = listar(T_MESAS)
+    nombres = {(m["nombre"] or "").lower() for m in ex}
+    orden = max([_i(m.get("orden")) for m in ex] or [0])
+    lay, hechas, errores = mapa_layout(), 0, []
+    for estilo, cant in (("barril", 5), ("chica", 11), ("grande", 2)):
         for i in range(1, cant + 1):
-            nombre = f"{base} {i}"
+            nombre = f"{BASE_ESTILO[estilo][0]} {i}"
             if nombre.lower() in nombres:
                 continue
             orden += 1
-            r = insertar(T_MESAS, {"nombre": nombre, "zona": zona, "capacidad": cap, "orden": orden})[0]
-            lay[str(r["id"])] = {"e": est}
-            n += 1
+            err = _crear_mesa(nombre, zona_id, estilo, lay, orden)
+            if err:
+                errores.append(err)
+            else:
+                hechas += 1
     cfg_set("mapa_layout", json.dumps(lay))
-    log("mesas_bar_creadas", f"{n} mesas (barriles, chicas y grandes)")
-    return n
+    log("mesas_bar_creadas", f"{hechas} mesas en {NOMBRE_ZONA[zona_id]}")
+    return hechas, errores
+
+
+def eliminar_mesas(ids):
+    mapa = {m["id"]: m for m in listar(T_MESAS)}
+    lay, ok_n, fallos = mapa_layout(), 0, []
+    for i in ids:
+        m = mapa.get(i)
+        if not m:
+            continue
+        try:
+            r, msg = eliminar_mesa(m)
+        except Exception as e:
+            r, msg = False, f"{m['nombre']}: {e}"
+        if r:
+            ok_n += 1
+            lay.pop(str(i), None)
+        else:
+            fallos.append(msg)
+    cfg_set("mapa_layout", json.dumps(lay))
+    texto = f"{ok_n} mesa(s) eliminada(s)." + (" Sin eliminar: " + " | ".join(fallos) if fallos else "")
+    return (ok_n > 0 or not fallos), texto
 
 
 def mapa_salon(mesas, ocupa, por_com, clis):
     lay = mapa_layout()
     pos = posiciones_mapa(mesas, lay)
+    msg = st.session_state.pop("_mapa_msg", None)
+    if msg:
+        (st.success if msg[0] else st.error)(msg[1])
+    vista = st.session_state.get("mapa_vista", "general")
+    cuenta = {k: [0, 0] for k, _, _ in ZONAS_MAPA}
+    for m in mesas:
+        c = cuenta[zona_mapa(m)]
+        c[1] += 1
+        c[0] += 1 if ocupa.get(m["id"]) else 0
+    opciones = [("general", f"🗺️ Plano general ({sum(c[0] for c in cuenta.values())}/{len(mesas)})")] + \
+               [(k, f"{ic} {n} ({cuenta[k][0]}/{cuenta[k][1]})") for k, n, ic in ZONAS_MAPA]
+    for col, (k, etq) in zip(st.columns(4), opciones):
+        if col.button(etq, key=f"mapa_v_{k}", type="primary" if vista == k else "secondary", **STRETCH):
+            st.session_state["mapa_vista"] = k
+            st.rerun()
     editar = False
     if usuario_actual():
-        editar = st.toggle("✏️ Editar distribución (arrastrá las mesas con el dedo o el mouse)", key="mapa_edit")
+        editar = st.toggle("✏️ Editar distribución (arrastrá las mesas, tocá para seleccionar)", key="mapa_edit")
     else:
-        st.caption("Tocá una mesa para abrirla o ver su pedido. Para mover las mesas de lugar, iniciá sesión en ⚙️ Admin.")
+        st.caption("Tocá una mesa para abrirla o ver su pedido. Para mover o eliminar mesas, iniciá sesión en ⚙️ Admin.")
+    visibles = [m for m in mesas if vista == "general" or zona_mapa(m) == vista]
+    ids_vis = [m["id"] for m in visibles]
+    if "_mapa_sel_set" in st.session_state:
+        st.session_state["mapa_sel_ms"] = st.session_state.pop("_mapa_sel_set")
+    sel = [i for i in st.session_state.get("mapa_sel_ms", []) if i in ids_vis]
+    st.session_state["mapa_sel_ms"] = sel
+    if vista == "general":
+        zonas = [("salon", 0, 0, 100, 52), ("galeria", 0, 52, 50, 48), ("patio", 50, 52, 50, 48)]
+        alto = 820
+    else:
+        zonas, alto = [(vista, 0, 0, 100, 100)], 640
+    emo = {k: ic for k, _, ic in ZONAS_MAPA}
+    datos_z = [{"id": k, "nombre": NOMBRE_ZONA[k], "emoji": emo[k], "x": x, "y": y, "w": w, "h": h,
+                "ocupadas": cuenta[k][0], "total": cuenta[k][1]} for k, x, y, w, h in zonas]
     datos = []
-    for m in mesas:
+    for m in visibles:
         com = ocupa.get(m["id"])
         x, y = pos[m["id"]]
-        d = {"id": m["id"], "nombre": m["nombre"], "estilo": estilo_mesa(m, lay), "x": x, "y": y,
-             "ocupada": bool(com), "cap": int(m["capacidad"])}
+        d = {"id": m["id"], "nombre": m["nombre"], "estilo": estilo_mesa(m, lay), "zona": zona_mapa(m), "x": x, "y": y,
+             "ocupada": bool(com), "cap": _i(m.get("capacidad"), 2)}
         if com:
-            d.update(total=peso(totales(com, por_com[com["id"]])["total"]),
-                     mins=int((ahora_utc() - parse_ts(com["abierta_ts"])).total_seconds() // 60), pers=int(com["comensales"] or 1))
+            try:
+                d.update(total=peso(totales(com, por_com[com["id"]])["total"]),
+                         mins=int((ahora_utc() - parse_ts(com["abierta_ts"])).total_seconds() // 60), pers=_i(com.get("comensales"), 1) or 1)
+            except Exception:
+                d.update(total="—", mins=0, pers=1)
         datos.append(d)
-    _mapa_comp()(mesas=datos, editar=editar, alto=600, key="mapa_salon", default=None)
-    st.caption("🟢 libre · 🟣 ocupada (muestra el total y el tiempo). Barriles 🛢️ · mesas chicas · mesas grandes de madera.")
-    if editar and mesas:
-        with st.expander("🛠️ Estilo de cada mesa y acciones del mapa", expanded=True):
-            sel = st.selectbox("Mesa", mesas, format_func=lambda m: m["nombre"], key="mapa_mesa_sel")
-            actual = estilo_mesa(sel, lay)
-            nuevo = st.radio("Estilo", list(ESTILOS_MESA), index=list(ESTILOS_MESA).index(actual), format_func=ESTILOS_MESA.get,
-                             horizontal=True, key=f"mapa_est_{sel['id']}")
-            if nuevo != actual:
-                lay[str(sel["id"])] = {**(lay.get(str(sel["id"])) or {}), "e": nuevo}
+    try:
+        _mapa_comp()(mesas=datos, zonas=datos_z, sel=sel, editar=editar, alto=alto, key="mapa_salon", default=None)
+    except Exception as e:
+        st.error(f"No se pudo dibujar el mapa: {e}")
+    st.caption("🟢 libre · 🟣 ocupada (muestra el total y el tiempo). Las mesas se ubican según su zona (Salón, Galería o Patio).")
+    if not editar:
+        return
+    with st.expander("🛠️ Mesas: agregar, mover de zona, estilo y eliminar", expanded=True):
+        st.markdown("**➕ Agregar mesas**")
+        c1, c2, c3 = st.columns(3)
+        est_n = c1.selectbox("Qué agregar", list(ESTILOS_MESA), format_func=ESTILOS_MESA.get, key="mapa_add_est")
+        cant_n = c2.number_input("Cantidad", 1, 30, 1, key="mapa_add_cant")
+        zona_def = vista if vista != "general" else "salon"
+        zk = [k for k, _, _ in ZONAS_MAPA]
+        zon_n = c3.selectbox("En la zona", zk, index=zk.index(zona_def), format_func=NOMBRE_ZONA.get, key=f"mapa_add_zona_{vista}")
+        b1, b2 = st.columns(2)
+        if b1.button("➕ Agregar", key="mapa_add_ok", type="primary", **STRETCH):
+            hechas, errs = agregar_mesas(est_n, cant_n, zon_n)
+            st.session_state["_mapa_msg"] = (not errs, f"Se agregaron {hechas} mesa(s)." + (" Errores: " + " | ".join(errs[:3]) if errs else ""))
+            st.rerun()
+        if b2.button("🪑 Crear las mesas del bar (5 barriles · 11 chicas · 2 grandes)", key="mapa_crear", **STRETCH):
+            hechas, errs = crear_mesas_bar(zon_n)
+            st.session_state["_mapa_msg"] = (not errs, f"Se crearon {hechas} mesa(s) en {NOMBRE_ZONA[zon_n]}, las que faltaban." +
+                                             (" Errores: " + " | ".join(errs[:3]) if errs else ""))
+            st.rerun()
+        st.markdown("**☑️ Seleccionar mesas** (también podés tocarlas en el mapa)")
+        por_id = {m["id"]: m for m in mesas}
+        elegidas = st.multiselect("Mesas seleccionadas", ids_vis, key="mapa_sel_ms",
+                                  format_func=lambda i: f"{por_id[i]['nombre']} · {NOMBRE_ZONA[zona_mapa(por_id[i])]}")
+        s1, s2 = st.columns(2)
+        if s1.button("☑️ Seleccionar todas las de esta vista", key="mapa_sel_todas", **STRETCH):
+            st.session_state["_mapa_sel_set"] = list(ids_vis)
+            st.rerun()
+        if s2.button("☐ Quitar la selección", key="mapa_sel_nada", **STRETCH):
+            st.session_state["_mapa_sel_set"] = []
+            st.rerun()
+        if elegidas:
+            st.markdown(f"**Con las {len(elegidas)} seleccionada(s):**")
+            m1, m2 = st.columns(2)
+            zdest = m1.selectbox("Mover a la zona", zk, format_func=NOMBRE_ZONA.get, key="mapa_mover_zona")
+            if m1.button("➡️ Mover de zona", key="mapa_mover_ok", **STRETCH):
+                for i in elegidas:
+                    actualizar(T_MESAS, i, {"zona": NOMBRE_ZONA[zdest]})
+                    lay.get(str(i), {}).pop("x", None)
+                    lay.get(str(i), {}).pop("y", None)
+                cfg_set("mapa_layout", json.dumps(lay))
+                log("mesas_zona", f"{len(elegidas)} mesas → {NOMBRE_ZONA[zdest]}")
+                st.rerun()
+            edest = m2.selectbox("Cambiar estilo a", list(ESTILOS_MESA), format_func=ESTILOS_MESA.get, key="mapa_estilo_sel")
+            if m2.button("🎨 Aplicar estilo", key="mapa_estilo_ok", **STRETCH):
+                for i in elegidas:
+                    lay[str(i)] = {**(lay.get(str(i)) or {}), "e": edest}
                 cfg_set("mapa_layout", json.dumps(lay))
                 st.rerun()
-            c1, c2 = st.columns(2)
-            if c1.button("🪑 Crear las mesas del bar", key="mapa_crear", **STRETCH):
-                n = crear_mesas_bar()
-                st.toast(f"Se crearon {n} mesas (5 barriles · 11 chicas · 2 grandes, las que faltaban)")
-                st.rerun()
-            if c2.button("↺ Reacomodar todo automático", key="mapa_auto", **STRETCH):
-                cfg_set("mapa_layout", json.dumps({k: {"e": v["e"]} for k, v in lay.items() if v.get("e")}))
-                st.rerun()
-            st.caption("«Crear las mesas del bar» suma las que falten (no toca las que ya tenés). "
-                       "Las que no uses podés desactivarlas o eliminarlas en Admin → Mesas.")
-    elif editar:
-        if st.button("🪑 Crear las mesas del bar (5 barriles · 11 chicas · 2 grandes)", key="mapa_crear0", type="primary", **STRETCH):
-            crear_mesas_bar()
+            nombres_sel = ", ".join(por_id[i]["nombre"] for i in elegidas[:8]) + ("…" if len(elegidas) > 8 else "")
+            confirmar_eliminar("mapa_del", f"Se eliminan {len(elegidas)} mesa(s): {nombres_sel}. No se puede si tienen una cuenta abierta. "
+                               f"Las cuentas pasadas conservan el nombre de la mesa.",
+                               lambda ids=list(elegidas): eliminar_mesas(ids), f"Eliminar seleccionadas ({len(elegidas)})")
+        if st.button("↺ Reacomodar todo automático", key="mapa_auto", **STRETCH):
+            cfg_set("mapa_layout", json.dumps({k: {"e": v["e"]} for k, v in lay.items() if v.get("e")}))
             st.rerun()
 
 
@@ -3973,25 +4212,30 @@ def pagina_comanda():
             c1.markdown(
                 f"{icono} **{it['cantidad']}× {esc(it['nombre'])}**<br>"
                 f"<small>{peso(float(it['precio_unit']) * it['cantidad'])}{nota}</small>{aviso}", unsafe_allow_html=True)
-            if c2.button("➖", key=f"mn{it['id']}"):
-                sumar_cantidad(it, -1)
-                st.rerun()
-            if c3.button("➕", key=f"mas{it['id']}"):
-                if enviado:
-                    sumar_pedido_extra(it)  # lo ya enviado no se toca: el extra queda sin confirmar
-                else:
-                    sumar_cantidad(it, 1)
-                st.rerun()
-            with c4.popover("✏️"):
+            with c2:
+                if ib("menos", it["id"], "Quitar uno"):
+                    sumar_cantidad(it, -1)
+                    st.rerun()
+            with c3:
+                if ib("mas", it["id"], "Agregar uno"):
+                    if enviado:
+                        sumar_pedido_extra(it)  # lo ya enviado no se toca: el extra queda sin confirmar
+                    else:
+                        sumar_cantidad(it, 1)
+                    st.rerun()
+            with c4:
+                pop = ib_popover("editar", it["id"], "Editar cantidad, precio o nota")
+            with pop:
                 nq = st.number_input("Cantidad", 1, 999, int(it["cantidad"]), key=f"eq{it['id']}")
                 npz = st.number_input("Precio unitario", 0.0, 10_000_000.0, float(it["precio_unit"]), 100.0, key=f"ep{it['id']}")
                 nv = st.text_input("Nota para cocina/barra", value=it["nota"], key=f"nt{it['id']}")
                 if st.button("Guardar", key=f"gn{it['id']}"):
                     hop_editar_item(it, nq, npz, nv.strip())
                     st.rerun()
-            if c5.button("🗑️", key=f"del{it['id']}"):
-                anular_item(it)
-                st.rerun()
+            with c5:
+                if ib("borrar", it["id"], "Quitar del pedido"):
+                    anular_item(it)
+                    st.rerun()
 
         if borrador:
             st.markdown("<div class='draft'><b>📝 Pedido sin confirmar</b><br>"
@@ -4020,9 +4264,9 @@ def pagina_comanda():
         com["descuento_pct"], com["propina_pct"] = desc, prop
         tot = totales(com, activos)
         st.markdown(
-            f"<small>Subtotal {peso(tot['sub'])}"
-            + (f" · Desc. -{peso(tot['desc'])}" if tot["desc"] else "")
-            + (f" · Propina {peso(tot['prop'])}" if tot["prop"] else "")
+            (f"<small>Subtotal {peso(tot['sub'])}"
+             + (f" · Desc. -{peso(tot['desc'])}" if tot["desc"] else "")
+             + (f" · Propina {peso(tot['prop'])}" if tot["prop"] else "")).replace("$", "&#36;")  # dos "$" en una línea = fórmula
             + f"</small><div class='totalbox'>{peso(tot['total'])}</div>", unsafe_allow_html=True)
         if com["comensales"] > 1 and tot["total"]:
             st.caption(f"≈ {peso(math.ceil(tot['total'] / com['comensales']))} por persona ({com['comensales']} comensales)")
@@ -4084,7 +4328,75 @@ def mp_link_dinamico(monto, titulo, ref):
         return None
 
 
+def qr_cuentas():
+    try:
+        return json.loads(CFG.get("qr_cuentas") or "[]")
+    except Exception:
+        return []
+
+
+def qr_activos_ids():
+    try:
+        return json.loads(CFG.get("qr_activos") or "[]")
+    except Exception:
+        return []
+
+
+def _bloque_qr_cuentas(com, monto, cuentas):
+    """Cobro con las cuentas QR que los dueños habilitaron para hoy. Devuelve el nombre de la cuenta; False si no hay ninguna."""
+    activos = set(qr_activos_ids())
+    act = [c for c in cuentas if c["id"] in activos]
+    if not act:
+        st.error("⚠️ No hay ningún QR habilitado para hoy. Un dueño tiene que elegirlo en Admin → Pagos.")
+        return False
+    fecha, hoy = CFG.get("qr_activos_fecha"), datetime.now(TZ).strftime("%Y-%m-%d")
+    if fecha and fecha != hoy:
+        st.warning(f"Los QR habilitados se eligieron el {fecha[8:]}/{fecha[5:7]}. Verificá que sean los de hoy (Admin → Pagos).")
+    if qrcode is None:
+        st.warning("Para generar códigos QR falta el paquete `qrcode[pil]` en requirements.txt.")
+    ck, ids = f"qs_{com['id']}", [c["id"] for c in act]
+    if st.session_state.get(ck) not in ids:
+        st.session_state[ck] = ids[0]
+    if len(act) > 1:
+        st.markdown("**¿A qué cuenta paga el cliente?**")
+        cols = st.columns(min(len(act), 3))
+        for n, c in enumerate(act):
+            if cols[n % len(cols)].button(c["nombre"], key=f"qsb_{com['id']}_{c['id']}",
+                                          type="primary" if st.session_state[ck] == c["id"] else "secondary", **STRETCH):
+                st.session_state[ck] = c["id"]
+                st.rerun()
+    cta = next(c for c in act if c["id"] == st.session_state[ck])
+    png, leyenda = None, ""
+    if CFG.get(f"qrimg_{cta['id']}"):
+        png, leyenda = base64.b64decode(CFG[f"qrimg_{cta['id']}"]), f"QR de la cuenta: el cliente ingresa {peso(monto)}"
+    else:
+        dato = cta.get("dato") or cta.get("alias") or CFG.get("negocio_alias")
+        if dato:
+            png, leyenda = qr_png(dato), f"QR con: {dato}"
+    c1, c2 = st.columns(2)
+    with c1:
+        if png:
+            st.image(png, width=300)
+        else:
+            st.warning("Esta cuenta no tiene imagen de QR ni alias cargado (Admin → Pagos).")
+    with c2:
+        if cta.get("proveedor") in PROV_NOMBRE:
+            st.markdown(chip(cta["proveedor"]), unsafe_allow_html=True)
+        st.markdown(f"<div class='totalbox'>{peso(monto)}</div>", unsafe_allow_html=True)
+        st.markdown(f"**Cuenta:** {esc(cta['nombre'])}")
+        st.caption(leyenda)
+        if cta.get("alias"):
+            st.caption("Alias / CVU")
+            st.code(cta["alias"], language=None)
+        if cta.get("titular"):
+            st.caption(f"Titular: {cta['titular']}")
+    return cta["nombre"]
+
+
 def bloque_qr(com, mesa, monto):
+    cuentas = qr_cuentas()
+    if cuentas:
+        return _bloque_qr_cuentas(com, monto, cuentas)
     hab = json.loads(CFG.get("pay_habilitados") or "[]")
     if not hab:
         st.warning("Configurá los medios de pago en **Admin → Pagos** (solo dueños).")
@@ -4142,7 +4454,7 @@ def pagina_cobro():
     b.metric("Pagado", peso(pagado))
     c.metric("Saldo", peso(saldo))
     if pagos:
-        st.caption(" · ".join(f"{p['metodo']}{' (' + p['proveedor'] + ')' if p['proveedor'] else ''} {peso(p['monto'])}" for p in pagos))
+        st.caption(" · ".join(f"{p['metodo']}{' (' + p['proveedor'] + ')' if p['proveedor'] else ''} {peso(p['monto'])}" for p in pagos).replace("$", "&#36;"))
 
     if not items:
         st.warning("La comanda no tiene consumos. Anulala desde la comanda.")
@@ -4158,31 +4470,64 @@ def pagina_cobro():
         st.caption(f"Cada uno: {peso(math.ceil(saldo / n))}")
     monto = st.number_input("Monto a cobrar ahora", 1, int(saldo), int(saldo), 100,
                             key=f"monto_{cid}_{len(pagos)}")
-    metodo = st.radio("¿Cómo paga el cliente?", ["💵 EFECTIVO", "📱 TRANSFERENCIA / QR", "💳 TARJETA"],
-                      horizontal=True, key=f"met_{cid}")
-    proveedor, ref = None, ""
-    if metodo.startswith("💵"):
-        rec = st.number_input("Entrega el cliente", int(monto), int(monto) * 10 + 100000, int(monto), 500, key=f"rec{cid}")
-        if rec > monto:
-            st.success(f"Vuelto: {peso(rec - monto)}")
-    elif metodo.startswith("📱"):
-        proveedor = bloque_qr(com, mesa, monto)
+    METS = {"efectivo": ("💵", "EFECTIVO", "Efectivo", "#39FF14"),
+            "qr": ("📱", "TRANSFERENCIA / QR", "QR / Transferencia", "#00E5CF"),
+            "tarjeta": ("💳", "TARJETA", "Tarjeta", "#FF2E93")}
+    st.markdown("<div class='cobro-titulo'>¿Cómo paga el cliente?</div>", unsafe_allow_html=True)
+    sel_k, ckey = f"cm_{cid}", f"cc_{cid}"
+    sel = st.session_state.get(sel_k)
+    for col, (k, (ic, et, _n, _c)) in zip(st.columns(3), METS.items()):
+        if col.button(f"{ic} {et}", key=f"cmb_{cid}_{k}", type="primary" if sel == k else "secondary", **STRETCH):
+            st.session_state[sel_k] = k
+            st.session_state.pop(ckey, None)
+            st.rerun()
+    if not sel:
+        st.info("👆 Elegí el medio de pago para seguir.")
     else:
-        ref = st.text_input("N° de cupón / últimos 4 (opcional)", key=f"cup{cid}")
-
-    nombre_metodo = {"💵": "Efectivo", "📱": "QR / Transferencia", "💳": "Tarjeta"}[metodo[:1]]
-    label = "✅ Recibí el pago" if metodo.startswith("📱") else "✅ Registrar cobro"
-    if st.button(label, type="primary", **STRETCH):
-        insertar(T_PAGOS, {"comanda_id": cid, "metodo": nombre_metodo, "proveedor": proveedor,
-                           "monto": float(monto), "usuario": actor(), "referencia": ref})
-        log("pago", f"comanda {cid} · {nombre_metodo} {proveedor or ''} · {peso(monto)}")
-        nuevos = listar(T_PAGOS, comanda_id=cid)
-        if tot["total"] - round(sum(float(p["monto"]) for p in nuevos)) <= 0:
-            cerrar_y_enviar(com, tot, nuevos)
-            st.session_state.pop("cid", None)
-            st.toast("Mesa cerrada ✅")
-            go(P_SALON)
-        st.rerun()
+        ic, et, nombre_metodo, color = METS[sel]
+        st.markdown(f"<div class='cobro-sel' style='background:{color}'>VA A PAGAR CON: {ic} {et} · {peso(monto)}</div>",
+                    unsafe_allow_html=True)
+        proveedor, ref, bloqueado, detalle = None, "", False, ""
+        if sel == "efectivo":
+            rec = st.number_input("Entrega el cliente", int(monto), int(monto) * 10 + 100000, int(monto), 500, key=f"rec{cid}")
+            if rec > monto:
+                st.success(f"Vuelto: {peso(rec - monto)}")
+                detalle = f"Entrega {peso(rec)} · Vuelto {peso(rec - monto)}"
+        elif sel == "qr":
+            r = bloque_qr(com, mesa, monto)
+            bloqueado, proveedor = (r is False), (r or None)
+            detalle = f"Cuenta: {proveedor}" if proveedor else ""
+        else:
+            ref = st.text_input("N° de cupón / últimos 4 (opcional)", key=f"cup{cid}")
+        firma = (sel, int(monto), proveedor or "")
+        if st.session_state.get(ckey) != firma:
+            st.session_state.pop(ckey, None)
+            if st.button("✅ REGISTRAR COBRO", key=f"rc_{cid}", type="primary", disabled=bloqueado, **STRETCH):
+                st.session_state[ckey] = firma
+                st.rerun()
+        else:
+            pregunta = ("¿Ya llegó la transferencia / el cliente ya pagó con el QR?" if sel == "qr"
+                        else "Revisá que el medio de pago sea el correcto")
+            st.markdown(f"<div class='cobro-conf'><div class='c1'>⚠️ Confirmá el cobro</div><div class='c2'>{peso(monto)}</div>"
+                        f"<div class='c3'>{ic} {et}</div><div class='c4'>{esc(detalle)}</div><div class='c4'>{pregunta}</div></div>",
+                        unsafe_allow_html=True)
+            b1, b2 = st.columns(2)
+            if b1.button("✅ SÍ, CONFIRMAR COBRO", key=f"rcok_{cid}", type="primary", **STRETCH):
+                insertar(T_PAGOS, {"comanda_id": cid, "metodo": nombre_metodo, "proveedor": proveedor,
+                                   "monto": float(monto), "usuario": actor(), "referencia": ref})
+                log("pago", f"comanda {cid} · {nombre_metodo} {proveedor or ''} · {peso(monto)}")
+                st.session_state.pop(ckey, None)
+                st.session_state.pop(sel_k, None)
+                nuevos = listar(T_PAGOS, comanda_id=cid)
+                if tot["total"] - round(sum(float(p["monto"]) for p in nuevos)) <= 0:
+                    cerrar_y_enviar(com, tot, nuevos)
+                    st.session_state.pop("cid", None)
+                    st.toast("Mesa cerrada ✅")
+                    go(P_SALON)
+                st.rerun()
+            if b2.button("↩ CAMBIAR", key=f"rcno_{cid}", **STRETCH):
+                st.session_state.pop(ckey, None)
+                st.rerun()
     if st.button("⬅ Volver a la comanda"):
         go(P_COMANDA)
 
@@ -4435,7 +4780,7 @@ def eliminar_usuario(u, users):
 
 def eliminar_item_def(it, estado_com):
     if not it["anulado"] and estado_com != "cancelada":  # el stock de un ítem vivo vuelve al depósito
-        aplicar_receta(it["producto_id"], -it["cantidad"], it["comanda_id"], f"Eliminación comanda #{it['comanda_id']}")
+        aplicar_receta(it.get("producto_id"), -it["cantidad"], it["comanda_id"], f"Eliminación comanda #{it['comanda_id']}")
     borrar(T_ITEMS, it["id"])
     log("item_eliminado", f"comanda {it['comanda_id']} · {it['cantidad']}× {it['nombre']}")
     recalcular_comanda(it["comanda_id"])
@@ -4446,7 +4791,7 @@ def eliminar_comanda(com, devolver_stock):
     cid = com["id"]
     if devolver_stock and com["estado"] != "cancelada":
         for it in items_de([cid]):
-            aplicar_receta(it["producto_id"], -it["cantidad"], cid, f"Comanda eliminada #{cid}")
+            aplicar_receta(it.get("producto_id"), -it["cantidad"], cid, f"Comanda eliminada #{cid}")
     tb(T_MOV).update({"comanda_id": None}).eq("comanda_id", cid).execute()
     tb(T_PAGOS).delete().eq("comanda_id", cid).execute()
     tb(T_ITEMS).delete().eq("comanda_id", cid).execute()
@@ -4462,6 +4807,15 @@ def eliminar_movimiento(m):
     borrar(T_MOV, m["id"])
     log("movimiento_eliminado", f"#{m['id']} · {m['tipo']} {float(m['cantidad']):g}")
     return True, "Movimiento eliminado del historial."
+
+
+def resetear_auditoria(confirma):
+    if (confirma or "").strip().upper() != "RESETEAR":
+        return False, "Escribí RESETEAR para confirmar."
+    tb(T_LOG).delete().gte("id", 0).execute()
+    st.session_state.pop("aud_cid", None)
+    log("auditoria_reseteada", "Se borró todo el historial de auditoría")
+    return True, "Auditoría reseteada: arrancás desde cero."
 
 
 def depurar_auditoria(lim):
@@ -4486,7 +4840,7 @@ def seleccionar_operaciones(modo, lim):
         ini += 1000
 
 
-def depurar_operaciones(modo, lim, devolver_stock, confirma):
+def depurar_operaciones(modo, lim, devolver_stock, confirma, borrar_log=False, borrar_movs=False):
     if modo == 2 and (confirma or "").strip().upper() != "RESETEAR":
         return False, "Escribí RESETEAR para confirmar el reseteo total."
     coms = seleccionar_operaciones(modo, lim)
@@ -4496,7 +4850,7 @@ def depurar_operaciones(modo, lim, devolver_stock, confirma):
         for c in coms:
             if c["estado"] == "abierta":
                 for it in items_de([c["id"]]):
-                    aplicar_receta(it["producto_id"], -it["cantidad"], c["id"], f"Reseteo comanda #{c['id']}")
+                    aplicar_receta(it.get("producto_id"), -it["cantidad"], c["id"], f"Reseteo comanda #{c['id']}")
     ids = [c["id"] for c in coms]
     for k in range(0, len(ids), 80):
         ch = ids[k:k + 80]
@@ -4506,6 +4860,10 @@ def depurar_operaciones(modo, lim, devolver_stock, confirma):
         tb(T_COM).delete().in_("id", ch).execute()
     for k in ("cid", "op_sel", "mesa_pend"):
         st.session_state.pop(k, None)
+    if modo == 2 and borrar_movs:
+        tb(T_MOV).delete().gte("id", 0).execute()
+    if modo == 2 and borrar_log:
+        tb(T_LOG).delete().gte("id", 0).execute()
     log("operaciones_depuradas", f"{len(ids)} comandas eliminadas ({['anteriores a ' + lim.strftime('%d/%m/%Y'), 'todas las cerradas', 'RESET TOTAL'][modo]})")
     return True, f"{len(ids)} operaciones eliminadas."
 
@@ -4513,7 +4871,7 @@ def depurar_operaciones(modo, lim, devolver_stock, confirma):
 def _panel_reset_operaciones():
     with st.expander("🧹 Eliminar / resetear operaciones (solo dueños)"):
         opciones = ["Cobradas y canceladas anteriores a una fecha", "Todas las cobradas y canceladas",
-                    "RESET TOTAL: todo, incluso las cuentas abiertas"]
+                    "🔥 RESETEAR TODO: todas las operaciones, incluso las abiertas (arrancar desde cero)"]
         modo = opciones.index(st.radio("¿Qué querés borrar?", opciones, key="rs_modo"))
         lim = date.today() - timedelta(days=30)
         if modo == 0:
@@ -4525,57 +4883,165 @@ def _panel_reset_operaciones():
         abiertas_n = cuenta["abierta"]
         extra = f", {abiertas_n} abiertas" if modo == 2 else ""
         st.info(f"Se borrarían **{len(sel)}** operaciones: {cuenta['pagada']} cobradas, {cuenta['cancelada']} canceladas{extra}.")
-        dev, txt = False, ""
+        dev, txt, blog, bmov = False, "", False, False
         if modo == 2:
             dev = st.checkbox("Devolver al stock lo consumido en las cuentas abiertas", value=True, key="rs_dev")
+            blog = st.checkbox("Borrar también TODA la auditoría", value=False, key="rs_log")
+            bmov = st.checkbox("Borrar también el historial de movimientos de stock (no cambia las cantidades)", value=False, key="rs_mov")
             txt = st.text_input("Para confirmar escribí RESETEAR", key="rs_txt")
         st.caption("Se borran las cuentas con sus consumos y cobros. Cambia el dashboard, las visitas y el consumo de los clientes. "
                    "El stock de insumos no se modifica (salvo la devolución indicada) y la auditoría queda intacta.")
         confirmar_eliminar("ops", f"Se eliminan {len(sel)} operaciones para siempre. No se puede deshacer.",
-                           lambda: depurar_operaciones(modo, lim, dev, txt), "Eliminar operaciones")
+                           lambda: depurar_operaciones(modo, lim, dev, txt, blog, bmov), "Eliminar operaciones")
+
+
+def corte_jornada():
+    try:
+        return int(float(CFG.get("jornada_corte") or 6))
+    except Exception:
+        return 6
+
+
+def inicio_jornada(offset_dias=0):
+    """La jornada del bar empieza a la hora de corte (por defecto 06:00), así una noche que pasa de medianoche cuenta como una sola."""
+    ahora = datetime.now(TZ)
+    ini = ahora.replace(hour=corte_jornada(), minute=0, second=0, microsecond=0)
+    if ahora < ini:
+        ini -= timedelta(days=1)
+    return (ini - timedelta(days=offset_dias)).astimezone(timezone.utc)
+
+
+def _traer_todo(q_fn):
+    out, ini = [], 0
+    while True:
+        r = q_fn().range(ini, ini + 999).execute().data or []
+        out += r
+        if len(r) < 1000:
+            return out
+        ini += 1000
+
+
+def _fmt_rango(d, h):
+    return f"{d.astimezone(TZ):%d/%m %H:%M} → {h.astimezone(TZ):%d/%m %H:%M}"
 
 
 def admin_dashboard():
-    hoy = iso(inicio_dia_utc())
-    pagadas = tb(T_COM).select("*").eq("estado", "pagada").gte("cerrada_ts", hoy).execute().data or []
-    ventas = sum(float(c["total"]) for c in pagadas)
+    st.markdown("### 📊 Dashboard")
+    opciones = ["Jornada de hoy", "Jornada de ayer", "Últimos 7 días", "Este mes", "Elegir fechas"]
+    per = st.selectbox("Período", opciones, key="dash_per")
+    ini0 = inicio_jornada(0)
+    if per == "Jornada de hoy":
+        desde, hasta = ini0, ini0 + timedelta(days=1)
+    elif per == "Jornada de ayer":
+        desde, hasta = inicio_jornada(1), ini0
+    elif per == "Últimos 7 días":
+        desde, hasta = inicio_jornada(6), ini0 + timedelta(days=1)
+    elif per == "Este mes":
+        m0 = datetime.now(TZ).replace(day=1, hour=corte_jornada(), minute=0, second=0, microsecond=0)
+        desde, hasta = m0.astimezone(timezone.utc), ini0 + timedelta(days=1)
+    else:
+        c1, c2 = st.columns(2)
+        f1 = c1.date_input("Desde", value=date.today() - timedelta(days=7), key="dash_f1")
+        f2 = c2.date_input("Hasta (inclusive)", value=date.today(), key="dash_f2")
+        h_ = corte_jornada()
+        desde = datetime(f1.year, f1.month, f1.day, h_, tzinfo=TZ).astimezone(timezone.utc)
+        hasta = datetime(f2.year, f2.month, f2.day, h_, tzinfo=TZ).astimezone(timezone.utc) + timedelta(days=1)
+    st.caption(f"📅 {_fmt_rango(desde, hasta)} · la jornada empieza a las {corte_jornada():02d}:00 (se cambia en Admin → Apariencia)")
+    with st.expander("ℹ️ Cómo leer este tablero"):
+        st.markdown(
+            "- **Cobrado**: plata que realmente entró (pagos registrados en Cobro) en el período.\n"
+            "- **Pendiente de cobro**: lo consumido en las cuentas que siguen abiertas ahora mismo.\n"
+            "- **Ticket enviado**: cada vez que la moza toca *Confirmar pedido* se genera un ticket para Cocina y/o para Barra.\n"
+            "- **Comandas**: cuántas cuentas distintas pidieron algo de ese rubro.\n"
+            "- **Unidades y dinero por rubro**: lo pedido en el período (incluye cuentas todavía abiertas), "
+            "a precio de lista: **sin descuentos ni propinas**. Por eso puede diferir del cobrado.")
+
+    d_iso, h_iso = iso(desde), iso(hasta)
+    cobradas = _traer_todo(lambda: tb(T_COM).select("id,total,cerrada_ts").eq("estado", "pagada")
+                           .gte("cerrada_ts", d_iso).lt("cerrada_ts", h_iso))
+    pagos = _traer_todo(lambda: tb(T_PAGOS).select("metodo,proveedor,monto").gte("ts", d_iso).lt("ts", h_iso))
+    items = _traer_todo(lambda: tb(T_ITEMS).select("comanda_id,nombre,sector,cantidad,precio_unit,confirmado_ts,ts")
+                        .eq("anulado", False).gte("ts", d_iso).lt("ts", h_iso))
+    abiertas = listar(T_COM, estado="abierta")
+    pend = 0.0
+    if abiertas:
+        its_ab = items_de([c["id"] for c in abiertas])
+        por_ab = defaultdict(list)
+        for it in its_ab:
+            por_ab[it["comanda_id"]].append(it)
+        pend = sum(totales(c, por_ab[c["id"]])["total"] for c in abiertas)
+
+    cobrado = sum(float(x["monto"]) for x in pagos)
+    st.markdown("#### 💰 Caja")
     a, b, c, d = st.columns(4)
-    a.metric("Ventas de hoy", peso(ventas))
-    b.metric("Cuentas cobradas", len(pagadas))
-    c.metric("Ticket promedio", peso(ventas / len(pagadas)) if pagadas else "—")
-    d.metric("Cuentas abiertas", len(listar(T_COM, estado="abierta")))
+    a.metric("Cobrado", peso(cobrado))
+    b.metric("Cuentas cobradas", len(cobradas))
+    c.metric("Ticket promedio", peso(sum(float(x["total"]) for x in cobradas) / len(cobradas)) if cobradas else "—")
+    d.metric("Pendiente de cobro", peso(pend), f"{len(abiertas)} cuenta(s) abierta(s)", delta_color="off")
 
-    rows = (tb(T_COM).select("total,cerrada_ts").eq("estado", "pagada")
-            .gte("cerrada_ts", iso(inicio_dia_utc(6))).execute().data or [])
-    if rows:
-        df = pd.DataFrame(rows)
-        df["dia"] = pd.to_datetime(df["cerrada_ts"], utc=True).dt.tz_convert(TZ).dt.date
-        g = df.groupby("dia")["total"].sum()
-        g.index = [x.strftime("%d/%m") for x in g.index]
-        st.markdown("#### Ventas últimos 7 días")
-        st.bar_chart(g)
+    st.markdown("#### 🍽️ Lo que salió, separado por rubro")
+    df = pd.DataFrame(items)
+    colores = {"Cocina": ("#FF8A00", "👨‍🍳"), "Barra": ("#00E5CF", "🍺")}
+    total_din, total_uni = 0.0, 0
+    resumen = {}
+    for sec in SECTORES:
+        sub = df[df["sector"] == sec] if len(df) else df
+        if len(sub):
+            din = float((sub["cantidad"] * sub["precio_unit"].astype(float)).sum())
+            uni = int(sub["cantidad"].sum())
+            tick = len({(r["comanda_id"], str(r["confirmado_ts"] or r["ts"])[:19]) for r in sub.to_dict("records")})
+            coms = int(sub["comanda_id"].nunique())
+        else:
+            din, uni, tick, coms = 0.0, 0, 0, 0
+        resumen[sec] = (din, uni, tick, coms)
+        total_din += din
+        total_uni += uni
+    cols = st.columns(len(SECTORES))
+    for col, sec in zip(cols, SECTORES):
+        din, uni, tick, coms = resumen[sec]
+        color, emo = colores.get(sec, ("#FFE600", "🍽️"))
+        pct = round(din / total_din * 100) if total_din else 0
+        col.markdown(
+            f"<div class='dcard' style='border-color:{color}'><div class='dh' style='background:{color}'>{emo} {esc(sec.upper())}</div>"
+            f"<div class='dgrid'><div><b>{tick}</b><span>Tickets enviados</span></div><div><b>{coms}</b><span>Comandas (cuentas)</span></div>"
+            f"<div><b>{uni}</b><span>Unidades</span></div><div><b>{peso(din)}</b><span>Dinero</span></div></div>"
+            f"<div class='dbar'><i style='width:{pct}%;background:{color}'></i></div><div class='dpct'>{pct}% del dinero pedido</div></div>",
+            unsafe_allow_html=True)
+    st.markdown(f"<div class='dtot'><b>Total pedido:</b> {total_uni} unidades · {peso(total_din)} (a precio de lista, sin descuentos ni propinas)</div>",
+                unsafe_allow_html=True)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### Más vendidos hoy")
-        its = tb(T_ITEMS).select("nombre,cantidad,precio_unit").eq("anulado", False).gte("ts", hoy).execute().data or []
-        if its:
-            df = pd.DataFrame(its)
-            df["importe"] = df["cantidad"] * df["precio_unit"].astype(float)
-            top = df.groupby("nombre").agg(unidades=("cantidad", "sum"), importe=("importe", "sum")).sort_values("unidades", ascending=False)
-            st.dataframe(top.head(10), **STRETCH)
-        else:
-            st.caption("Sin ventas todavía.")
-    with c2:
-        st.markdown("#### Cobros de hoy por medio")
-        pg = tb(T_PAGOS).select("metodo,proveedor,monto").gte("ts", hoy).execute().data or []
-        if pg:
-            df = pd.DataFrame(pg)
-            df["medio"] = df.apply(lambda r: f"{r['metodo']}" + (f" · {r['proveedor']}" if r["proveedor"] else ""), axis=1)
-            df["monto"] = df["monto"].astype(float)
-            st.dataframe(df.groupby("medio")["monto"].sum().sort_values(ascending=False), **STRETCH)
-        else:
-            st.caption("Sin cobros todavía.")
+    if len(df):
+        df["importe"] = df["cantidad"] * df["precio_unit"].astype(float)
+        cs = st.columns(len(SECTORES))
+        for col, sec in zip(cs, SECTORES):
+            with col:
+                st.markdown(f"**Más vendidos · {sec}**")
+                sub = df[df["sector"] == sec]
+                if len(sub):
+                    top = sub.groupby("nombre").agg(unidades=("cantidad", "sum"), importe=("importe", "sum")).sort_values("unidades", ascending=False)
+                    st.dataframe(top.head(10), **STRETCH)
+                else:
+                    st.caption("Sin pedidos en este rubro.")
+    st.markdown("#### 💳 Cobros por medio")
+    if pagos:
+        dp = pd.DataFrame(pagos)
+        dp["medio"] = dp.apply(lambda r: f"{r['metodo']}" + (f" · {r['proveedor']}" if r["proveedor"] else ""), axis=1)
+        dp["monto"] = dp["monto"].astype(float)
+        g = dp.groupby("medio")["monto"].agg(["sum", "count"]).sort_values("sum", ascending=False)
+        g.columns = ["Monto", "Cobros"]
+        g["%"] = (g["Monto"] / g["Monto"].sum() * 100).round(1)
+        st.dataframe(g, **STRETCH)
+    else:
+        st.caption("Sin cobros en este período.")
+
+    ult = _traer_todo(lambda: tb(T_COM).select("total,cerrada_ts").eq("estado", "pagada").gte("cerrada_ts", iso(inicio_jornada(6))))
+    if ult:
+        dd = pd.DataFrame(ult)
+        dd["dia"] = (pd.to_datetime(dd["cerrada_ts"], utc=True).dt.tz_convert(TZ) - pd.Timedelta(hours=corte_jornada())).dt.date
+        g2 = dd.groupby("dia")["total"].sum()
+        g2.index = [x.strftime("%d/%m") for x in g2.index]
+        st.markdown("#### 📈 Cobrado por jornada (últimos 7 días)")
+        st.bar_chart(g2)
 
     bajos = [i for i in listar(T_INS, activo=True) if float(i["stock"]) <= float(i["minimo"])]
     if bajos:
@@ -4635,7 +5101,9 @@ def admin_productos():
                 i = imap.get(r["insumo_id"])
                 x1, x2 = st.columns([6, 1])
                 x1.caption(f"{i['nombre'] if i else '?'} — {float(r['cantidad']):g} {i['unidad'] if i else ''}")
-                if x2.button("🗑️", key=f"dr{r['id']}"):
+                with x2:
+                    quitar_r = ib("borrar", f"r{r['id']}", "Quitar de la receta")
+                if quitar_r:
                     borrar(T_REC, r["id"])
                     log("receta_quitada", f"{p['nombre']} − {i['nombre'] if i else r['insumo_id']}")
                     st.rerun()
@@ -4781,7 +5249,98 @@ def admin_mesas():
                            f"No se puede si tiene una cuenta abierta.", lambda m=m: eliminar_mesa(m), "Eliminar mesa")
 
 
+def _img_qr_b64(up):
+    img = Image.open(up).convert("RGB")
+    img.thumbnail((900, 900))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def eliminar_qr_cuenta(c):
+    cfg_set("qr_cuentas", json.dumps([x for x in qr_cuentas() if x["id"] != c["id"]]))
+    cfg_set("qr_activos", json.dumps([i for i in qr_activos_ids() if i != c["id"]]))
+    tb(T_CFG).delete().eq("clave", f"qrimg_{c['id']}").execute()
+    CFG.pop(f"qrimg_{c['id']}", None)
+    log("qr_eliminado", c["nombre"])
+    return True, f"QR «{c['nombre']}» eliminado."
+
+
+def admin_qr_cuentas():
+    cuentas = qr_cuentas()
+    activos = [i for i in qr_activos_ids() if any(c["id"] == i for c in cuentas)]
+    st.markdown("#### 📱 QR / cuentas para cobrar")
+    st.caption("Cargá todas las cuentas QR que tengan (sin límite: Mercado Pago de cada dueño, MODO, Ualá, etc.) "
+               "y elegí abajo cuáles se usan HOY. En Cobro, el mozo solo ve las habilitadas.")
+    if cuentas:
+        elegidos = st.multiselect("✅ QR habilitados para hoy (elegilos antes de abrir)", [c["id"] for c in cuentas], default=activos,
+                                  format_func=lambda i: next(c["nombre"] for c in cuentas if c["id"] == i), key="qr_hoy")
+        f = CFG.get("qr_activos_fecha")
+        c1, c2 = st.columns([1, 2])
+        if c1.button("💾 Guardar QR de hoy", type="primary", key="qr_hoy_ok", **STRETCH):
+            cfg_set("qr_activos", json.dumps(elegidos))
+            cfg_set("qr_activos_fecha", datetime.now(TZ).strftime("%Y-%m-%d"))
+            log("qr_jornada", ", ".join(next(c["nombre"] for c in cuentas if c["id"] == i) for i in elegidos) or "ninguno")
+            st.toast("QR de la jornada guardados ✅")
+            st.rerun()
+        c2.caption(f"Última selección: {f[8:]}/{f[5:7]}" if f else "Todavía no elegiste los QR de la jornada.")
+        if not activos:
+            st.warning("Ahora no hay ningún QR habilitado: el cobro por QR queda bloqueado hasta que elijas uno.")
+    with st.expander("➕ Agregar una cuenta QR", expanded=not cuentas):
+        with st.form("qr_nuevo", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            nom = c1.text_input("Nombre para mostrar", placeholder="Ej. Mercado Pago · Juan")
+            prov = c2.selectbox("Billetera / banco", [s_ for s_, _, _ in PROVEEDORES], format_func=lambda x: PROV_NOMBRE[x])
+            c3, c4 = st.columns(2)
+            tit = c3.text_input("Titular de la cuenta")
+            ali = c4.text_input("Alias / CVU (opcional)")
+            dato = st.text_input("Link o dato para generar el QR (si no subís la imagen)")
+            up = st.file_uploader("Imagen del QR de cobro (recomendado)", type=["png", "jpg", "jpeg"])
+            if st.form_submit_button("Agregar QR", type="primary"):
+                if not nom.strip():
+                    st.error("Poné un nombre para identificar la cuenta.")
+                else:
+                    nid = pysecrets.token_hex(3)
+                    cuentas.append({"id": nid, "nombre": nom.strip(), "proveedor": prov, "titular": tit.strip(),
+                                    "alias": ali.strip(), "dato": dato.strip()})
+                    if up:
+                        cfg_set(f"qrimg_{nid}", _img_qr_b64(up))
+                    cfg_set("qr_cuentas", json.dumps(cuentas))
+                    log("qr_creado", nom.strip())
+                    st.rerun()
+    for c in cuentas:
+        marca = "🟢 " if c["id"] in activos else ""
+        with st.expander(f"{marca}{c['nombre']} · {PROV_NOMBRE.get(c.get('proveedor'), '')}"):
+            if CFG.get(f"qrimg_{c['id']}"):
+                st.image(base64.b64decode(CFG[f"qrimg_{c['id']}"]), width=170)
+            with st.form(f"qr_ed_{c['id']}"):
+                c1, c2 = st.columns(2)
+                nom = c1.text_input("Nombre para mostrar", c["nombre"])
+                provs = [s_ for s_, _, _ in PROVEEDORES]
+                prov = c2.selectbox("Billetera / banco", provs, index=provs.index(c["proveedor"]) if c.get("proveedor") in provs else 0,
+                                    format_func=lambda x: PROV_NOMBRE[x])
+                c3, c4 = st.columns(2)
+                tit = c3.text_input("Titular", c.get("titular") or "")
+                ali = c4.text_input("Alias / CVU", c.get("alias") or "")
+                dato = st.text_input("Link o dato para generar el QR", c.get("dato") or "")
+                up = st.file_uploader("Reemplazar imagen del QR", type=["png", "jpg", "jpeg"], key=f"qr_up_{c['id']}")
+                quitar = st.checkbox("Quitar la imagen actual", key=f"qr_q_{c['id']}")
+                if st.form_submit_button("💾 Guardar cambios", type="primary") and nom.strip():
+                    c.update({"nombre": nom.strip(), "proveedor": prov, "titular": tit.strip(), "alias": ali.strip(), "dato": dato.strip()})
+                    if up:
+                        cfg_set(f"qrimg_{c['id']}", _img_qr_b64(up))
+                    elif quitar:
+                        cfg_set(f"qrimg_{c['id']}", "")
+                    cfg_set("qr_cuentas", json.dumps(cuentas))
+                    log("qr_editado", nom.strip())
+                    st.rerun()
+            confirmar_eliminar(f"qr{c['id']}", f"Se elimina la cuenta QR «{c['nombre']}» y su imagen.",
+                               lambda c=c: eliminar_qr_cuenta(c), "Eliminar QR")
+    st.divider()
+
+
 def admin_pagos():
+    admin_qr_cuentas()
     st.markdown("#### Datos de cobro del local")
     with st.form("datos_pago"):
         c1, c2 = st.columns(2)
@@ -4798,29 +5357,31 @@ def admin_pagos():
                 cfg_set(k, v)
             log("pagos_config", "Datos de cobro actualizados")
             st.rerun()
-    st.markdown("#### QR propio por medio")
-    st.caption("Para que las apps de bancos y billeteras lo lean directo, subí el QR de cobro que te da cada app "
-               "(Mercado Pago, MODO, Ualá, etc.). Si no subís nada, se genera un QR con el link/alias que cargues.")
-    for slug in json.loads(CFG.get("pay_habilitados") or "[]"):
-        with st.expander(PROV_NOMBRE[slug]):
-            st.markdown(chip(slug), unsafe_allow_html=True)
-            dato = st.text_input("Link, alias o CVU para el QR", CFG.get(f"pay_{slug}_dato", ""), key=f"pd_{slug}")
-            up = st.file_uploader("Subir QR del comercio (imagen)", type=["png", "jpg", "jpeg"], key=f"pu_{slug}")
-            c1, c2 = st.columns(2)
-            if c1.button("Guardar", key=f"ps_{slug}"):
-                cfg_set(f"pay_{slug}_dato", dato.strip())
-                if up:
-                    buf = io.BytesIO()
-                    Image.open(up).convert("RGB").save(buf, "PNG")
-                    cfg_set(f"pay_{slug}_qr", base64.b64encode(buf.getvalue()).decode())
-                log("pagos_qr", PROV_NOMBRE[slug])
-                st.rerun()
-            if CFG.get(f"pay_{slug}_qr"):
-                st.image(base64.b64decode(CFG[f"pay_{slug}_qr"]), width=160)
-                if c2.button("Quitar QR subido", key=f"pq_{slug}"):
-                    cfg_set(f"pay_{slug}_qr", "")
+    with st.expander("QR por medio (modo anterior: se usa solo si no cargaste cuentas QR arriba)"):
+        st.markdown("#### QR propio por medio")
+        st.caption("Para que las apps de bancos y billeteras lo lean directo, subí el QR de cobro que te da cada app "
+                   "(Mercado Pago, MODO, Ualá, etc.). Si no subís nada, se genera un QR con el link/alias que cargues.")
+        for slug in json.loads(CFG.get("pay_habilitados") or "[]"):
+            with st.expander(PROV_NOMBRE[slug]):
+                st.markdown(chip(slug), unsafe_allow_html=True)
+                dato = st.text_input("Link, alias o CVU para el QR", CFG.get(f"pay_{slug}_dato", ""), key=f"pd_{slug}")
+                up = st.file_uploader("Subir QR del comercio (imagen)", type=["png", "jpg", "jpeg"], key=f"pu_{slug}")
+                c1, c2 = st.columns(2)
+                if c1.button("Guardar", key=f"ps_{slug}"):
+                    cfg_set(f"pay_{slug}_dato", dato.strip())
+                    if up:
+                        buf = io.BytesIO()
+                        Image.open(up).convert("RGB").save(buf, "PNG")
+                        cfg_set(f"pay_{slug}_qr", base64.b64encode(buf.getvalue()).decode())
+                    log("pagos_qr", PROV_NOMBRE[slug])
                     st.rerun()
-    st.info("Mercado Pago con monto exacto: cargá `[mercadopago] access_token` en los Secrets.")
+                if CFG.get(f"pay_{slug}_qr"):
+                    st.image(base64.b64decode(CFG[f"pay_{slug}_qr"]), width=160)
+                    if c2.button("Quitar QR subido", key=f"pq_{slug}"):
+                        cfg_set(f"pay_{slug}_qr", "")
+                        st.rerun()
+    st.info("El link de Mercado Pago con monto exacto (`[mercadopago] access_token` en Secrets) se usa solo en el modo anterior; "
+            "con cuentas QR cargadas se muestra el QR de la cuenta elegida.")
 
 
 def admin_usuarios():
@@ -4931,6 +5492,11 @@ def admin_auditoria():
             lim = st.date_input("Eliminar los registros anteriores al", value=date.today() - timedelta(days=90), key="aud_lim")
             confirmar_eliminar("aud", f"Se borran TODOS los registros de auditoría anteriores al {lim:%d/%m/%Y}. No se puede deshacer.",
                                lambda: depurar_auditoria(lim), "Depurar auditoría")
+        with st.expander("🔥 Resetear TODA la auditoría (arrancar desde cero, solo dueños)"):
+            st.caption("Borra absolutamente todos los registros. Queda un único renglón que avisa del reseteo.")
+            ctxt = st.text_input("Para confirmar escribí RESETEAR", key="aud_rs_txt")
+            confirmar_eliminar("aud_all", "Se borra TODO el historial de auditoría. No se puede deshacer.",
+                               lambda: resetear_auditoria(ctxt), "Resetear toda la auditoría")
 
 
 def admin_apariencia():
@@ -4938,6 +5504,8 @@ def admin_apariencia():
         nom = st.text_input("Nombre en ticket", CFG.get("negocio_nombre", "HOPSIE · Cerveza Artesanal"))
         pie = st.text_input("Pie del ticket", CFG.get("ticket_pie", "¡Gracias por visitarnos! 🍻"))
         prop = st.number_input("Propina sugerida por defecto (%)", 0.0, 30.0, cfg_num("propina_default", 0), 1.0)
+        jc = st.number_input("La jornada de trabajo empieza a las (hora, 0-12)", 0, 12, int(cfg_num("jornada_corte", 6)), 1,
+                             help="Una noche que pasa de medianoche cuenta como una sola jornada en el Dashboard.")
         wa_auto = st.checkbox("Enviar el ticket por WhatsApp automáticamente al cobrar (si el cliente tiene teléfono)",
                               value=CFG.get("wa_auto", "1") == "1")
         st.caption("✅ WhatsApp automático configurado." if wa_config() else
@@ -4949,6 +5517,7 @@ def admin_apariencia():
             cfg_set("ticket_pie", pie)
             cfg_set("propina_default", str(prop))
             cfg_set("wa_auto", "1" if wa_auto else "0")
+            cfg_set("jornada_corte", str(int(jc)))
             if up:
                 img = Image.open(up).convert("RGBA")
                 img.thumbnail((700, 700))
@@ -5152,7 +5721,7 @@ def admin_operaciones():
                 else:
                     if com["estado"] == "cancelada":
                         for it in items_de([cid]):
-                            aplicar_receta(it["producto_id"], it["cantidad"], cid, f"Reapertura comanda #{cid}")
+                            aplicar_receta(it.get("producto_id"), it["cantidad"], cid, f"Reapertura comanda #{cid}")
                     actualizar(T_COM, cid, {"estado": "abierta", "cerrada_ts": None, "total": 0, "metodo_pago": ""})
                     log("comanda_reabierta", f"comanda {cid} (estaba {com['estado']})")
                     st.session_state["cid"] = cid
@@ -5340,8 +5909,13 @@ def main_hopsie():
     elif "nav" not in st.session_state:
         st.session_state["nav"] = P_SALON
     c1, c2 = st.columns([5, 1.3])
+    pagina = st.session_state["nav"]
     with c1:
-        pagina = st.radio("Navegación", NAV, horizontal=True, key="nav", label_visibility="collapsed")
+        with st.container(key="navbar"):
+            for col, pg in zip(st.columns(len(NAV)), NAV):
+                if col.button(pg, key=f"nav_{NAV.index(pg)}", type="primary" if pagina == pg else "secondary", **STRETCH):
+                    st.session_state["nav"] = pg
+                    st.rerun()
     with c2:
         u = usuario_actual()
         if u:
@@ -5360,7 +5934,12 @@ def main_hopsie():
 # Solo se ejecuta el módulo activo (su estilo y sus consultas), el otro queda en reposo.
 # ══════════════════════════════════════════
 st.markdown(f"<style>{MODULE_BAR_CSS}</style>", unsafe_allow_html=True)
-st.radio("Módulo", MODULOS, horizontal=True, key="app_modulo", label_visibility="collapsed")
+with st.container(key="modbar"):
+    _mc = st.columns([1, 1, 3])
+for _col, _mod, _k in zip(_mc, MODULOS, ("panol", "hopsie")):
+    if _col.button(_mod, key=f"nav_mod_{_k}", type="primary" if st.session_state["app_modulo"] == _mod else "secondary", **STRETCH):
+        st.session_state["app_modulo"] = _mod
+        st.rerun()
 _hopsie_activo = st.session_state["app_modulo"] == MOD_HOPSIE
 st.query_params["modulo"] = "hopsie" if _hopsie_activo else "panol"  # el enlace y F5 conservan el módulo
 

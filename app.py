@@ -2530,6 +2530,34 @@ hr{border-color:var(--p) !important}
 .paper table{width:100%;border-collapse:collapse}.paper td{padding:2px 0;vertical-align:top}
 @media (max-width:760px){.block-container{padding:.8rem .7rem 2rem;box-shadow:4px 4px 0 var(--p)}
   .hop-title{font-size:1.7rem}.hop-head img{max-height:56px}}
+
+/* ── BOTONES v3: TODOS iguales, legibles y vistosos (incluye popovers "Eliminar", link buttons, uploader) ── */
+:where(button[data-testid^="stBaseButton-secondary"],button[data-testid^="stBaseButton-primary"],button[data-testid="stBaseButton-secondaryFormSubmit"],button[data-testid="stBaseButton-primaryFormSubmit"],[data-testid="stPopoverButton"],[data-testid^="stBaseLinkButton"],[data-testid="stFileUploaderDropzone"] button,.stDownloadButton button,.stButton button,.stFormSubmitButton button){
+  background:linear-gradient(135deg,#23233a,#0d0d16) !important;color:#fff !important;-webkit-text-fill-color:#fff !important;
+  border:3px solid var(--t) !important;border-radius:14px !important;box-shadow:4px 4px 0 var(--t) !important;
+  font-weight:800 !important;opacity:1 !important;text-decoration:none !important;
+  transition:transform .12s, box-shadow .12s, background .12s}
+:where(button[data-testid^="stBaseButton-secondary"] *,button[data-testid^="stBaseButton-primary"] *,button[data-testid="stBaseButton-secondaryFormSubmit"] *,button[data-testid="stBaseButton-primaryFormSubmit"] *,[data-testid="stPopoverButton"] *,[data-testid^="stBaseLinkButton"] *,[data-testid="stFileUploaderDropzone"] button *,.stDownloadButton button *,.stButton button *,.stFormSubmitButton button *){color:inherit !important;-webkit-text-fill-color:currentColor !important;fill:currentColor !important;opacity:1 !important}
+:where(button[data-testid^="stBaseButton-secondary"]:hover:not(:disabled),button[data-testid^="stBaseButton-primary"]:hover:not(:disabled),button[data-testid="stBaseButton-secondaryFormSubmit"]:hover:not(:disabled),button[data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled),[data-testid="stPopoverButton"]:hover:not(:disabled),[data-testid^="stBaseLinkButton"]:hover:not(:disabled),[data-testid="stFileUploaderDropzone"] button:hover:not(:disabled),.stDownloadButton button:hover:not(:disabled),.stButton button:hover:not(:disabled),.stFormSubmitButton button:hover:not(:disabled)){
+  background:var(--y) !important;color:#000 !important;-webkit-text-fill-color:#000 !important;border-color:var(--p) !important;
+  box-shadow:6px 6px 0 var(--p) !important;transform:translate(-2px,-2px)}
+:where(button[data-testid^="stBaseButton-secondary"]:active:not(:disabled),button[data-testid^="stBaseButton-primary"]:active:not(:disabled),button[data-testid="stBaseButton-secondaryFormSubmit"]:active:not(:disabled),button[data-testid="stBaseButton-primaryFormSubmit"]:active:not(:disabled),[data-testid="stPopoverButton"]:active:not(:disabled),[data-testid^="stBaseLinkButton"]:active:not(:disabled),[data-testid="stFileUploaderDropzone"] button:active:not(:disabled),.stDownloadButton button:active:not(:disabled),.stButton button:active:not(:disabled),.stFormSubmitButton button:active:not(:disabled)){transform:translate(3px,3px);box-shadow:0 0 0 var(--p) !important}
+:where(button[data-testid="stBaseButton-primary"],button[data-testid="stBaseButton-primaryFormSubmit"],button[kind="primary"],[data-testid="stBaseLinkButton-primary"]){
+  background:linear-gradient(135deg,var(--p),#FF6A3D) !important;border-color:var(--y) !important;box-shadow:4px 4px 0 var(--y) !important;color:#fff !important}
+:where(button[data-testid^="stBaseButton-secondary"]:disabled,button[data-testid^="stBaseButton-primary"]:disabled,button[data-testid="stBaseButton-secondaryFormSubmit"]:disabled,button[data-testid="stBaseButton-primaryFormSubmit"]:disabled,[data-testid="stPopoverButton"]:disabled,[data-testid^="stBaseLinkButton"]:disabled,[data-testid="stFileUploaderDropzone"] button:disabled,.stDownloadButton button:disabled,.stButton button:disabled,.stFormSubmitButton button:disabled){
+  background:#242433 !important;color:#d6d6e4 !important;-webkit-text-fill-color:#d6d6e4 !important;border-color:#6b6b85 !important;box-shadow:none !important;
+  opacity:.8 !important;transform:none !important;cursor:not-allowed}
+:where(button[data-testid^="stBaseButton-secondary"]:focus-visible,button[data-testid^="stBaseButton-primary"]:focus-visible,button[data-testid="stBaseButton-secondaryFormSubmit"]:focus-visible,button[data-testid="stBaseButton-primaryFormSubmit"]:focus-visible,[data-testid="stPopoverButton"]:focus-visible,[data-testid^="stBaseLinkButton"]:focus-visible,[data-testid="stFileUploaderDropzone"] button:focus-visible,.stDownloadButton button:focus-visible,.stButton button:focus-visible,.stFormSubmitButton button:focus-visible){outline:3px solid var(--y) !important;outline-offset:2px}
+/* eliminar (también el botón que abre el cartelito de confirmación) */
+.block-container [class*="st-key-del_"] button,.block-container [class*="st-key-del_"] [data-testid="stPopoverButton"]{
+  background:linear-gradient(135deg,#C4152F,#7A0A1C) !important;border-color:#FF4D6D !important;color:#fff !important;
+  -webkit-text-fill-color:#fff !important;box-shadow:4px 4px 0 #000 !important}
+.block-container [class*="st-key-del_"] button *,.block-container [class*="st-key-del_"] [data-testid="stPopoverButton"] *{color:#fff !important;fill:#fff !important}
+.block-container [class*="st-key-del_"] button:hover,.block-container [class*="st-key-del_"] [data-testid="stPopoverButton"]:hover{
+  background:#FF1F3D !important;color:#fff !important;-webkit-text-fill-color:#fff !important;border-color:#FFE600 !important}
+/* cartelito (popover) oscuro, no blanco */
+[data-testid="stPopoverBody"]{background:#12121a !important;border:3px solid var(--p) !important;border-radius:16px !important;color:#fff !important}
+[data-testid="stPopoverBody"] *{color:#fff}
 </style>
 """
 
@@ -3855,18 +3883,25 @@ def _crear_mesa(nombre, zona_id, estilo, lay, orden):
         return f"{nombre}: {e}"
 
 
-def agregar_mesas(estilo, cantidad, zona_id):
-    """Suma 'cantidad' mesas del estilo elegido a una zona, siguiendo la numeración (Barril 6, Barril 7…)."""
+def agregar_mesas(estilo, cantidad, zona_id, nombre=""):
+    """Suma 'cantidad' mesas del estilo elegido a una zona.
+    Sin nombre: numeración automática (Barril 6, Barril 7…). Con nombre y cantidad 1: ese nombre exacto.
+    Con nombre y varias: se numeran (Mesa 11, Mesa 12…)."""
     ex = listar(T_MESAS)
     nombres = {(m["nombre"] or "").lower() for m in ex}
     orden = max([_i(m.get("orden")) for m in ex] or [0])
-    lay, base, n, hechas, errores = mapa_layout(), BASE_ESTILO[estilo][0], 1, 0, []
+    nombre = (nombre or "").strip()
+    lay, base, n, hechas, errores = mapa_layout(), nombre or BASE_ESTILO[estilo][0], 1, 0, []
     for _ in range(int(cantidad)):
-        while f"{base} {n}".lower() in nombres:
-            n += 1
+        if nombre and int(cantidad) == 1 and nombre.lower() not in nombres:
+            nuevo = nombre
+        else:
+            while f"{base} {n}".lower() in nombres:
+                n += 1
+            nuevo = f"{base} {n}"
         orden += 1
-        err = _crear_mesa(f"{base} {n}", zona_id, estilo, lay, orden)
-        nombres.add(f"{base} {n}".lower())
+        err = _crear_mesa(nuevo, zona_id, estilo, lay, orden)
+        nombres.add(nuevo.lower())
         if err:
             errores.append(err)
         else:
@@ -3874,6 +3909,29 @@ def agregar_mesas(estilo, cantidad, zona_id):
     cfg_set("mapa_layout", json.dumps(lay))
     log("mesas_agregadas", f"{hechas} × {base} en {NOMBRE_ZONA[zona_id]}")
     return hechas, errores
+
+
+def renombrar_mesas(cambios, mesas):
+    """cambios: {id: nombre_nuevo}. Cambia el nombre en la tabla de mesas (la misma que ves en Admin → Mesas)."""
+    por_id = {m["id"]: m for m in mesas}
+    usados = {(m["nombre"] or "").strip().lower(): m["id"] for m in mesas}
+    ok_n, errs = 0, []
+    for i, nuevo in cambios.items():
+        m, nuevo = por_id.get(i), (nuevo or "").strip()
+        if not m or not nuevo or nuevo == m["nombre"]:
+            continue
+        if usados.get(nuevo.lower(), i) != i:
+            errs.append(f"«{nuevo}» ya existe")
+            continue
+        try:
+            actualizar(T_MESAS, i, {"nombre": nuevo})
+            usados.pop((m["nombre"] or "").strip().lower(), None)
+            usados[nuevo.lower()] = i
+            log("mesa_editada", f"{m['nombre']} → {nuevo} (desde el mapa)")
+            ok_n += 1
+        except Exception as e:
+            errs.append(f"{nuevo}: {e}")
+    return ok_n, errs
 
 
 def crear_mesas_bar(zona_id):
@@ -3984,9 +4042,12 @@ def mapa_salon(mesas, ocupa, por_com, clis):
         zona_def = vista if vista != "general" else "salon"
         zk = [k for k, _, _ in ZONAS_MAPA]
         zon_n = c3.selectbox("En la zona", zk, index=zk.index(zona_def), format_func=NOMBRE_ZONA.get, key=f"mapa_add_zona_{vista}")
+        nom_n = st.text_input("Nombre (opcional)", key="mapa_add_nom", placeholder="Ej. Mesa 11 · vacío = numeración automática",
+                              help="Con cantidad 1 se usa tal cual. Con varias se numeran: «Mesa 1», «Mesa 2»… "
+                                   "El nombre queda igual en Admin → Mesas, porque es la misma lista.")
         b1, b2 = st.columns(2)
         if b1.button("➕ Agregar", key="mapa_add_ok", type="primary", **STRETCH):
-            hechas, errs = agregar_mesas(est_n, cant_n, zon_n)
+            hechas, errs = agregar_mesas(est_n, cant_n, zon_n, nom_n)
             st.session_state["_mapa_msg"] = (not errs, f"Se agregaron {hechas} mesa(s)." + (" Errores: " + " | ".join(errs[:3]) if errs else ""))
             st.rerun()
         if b2.button("🪑 Crear las mesas del bar (5 barriles · 11 chicas · 2 grandes)", key="mapa_crear", **STRETCH):
@@ -4023,6 +4084,14 @@ def mapa_salon(mesas, ocupa, por_com, clis):
                     lay[str(i)] = {**(lay.get(str(i)) or {}), "e": edest}
                 cfg_set("mapa_layout", json.dumps(lay))
                 st.rerun()
+            with st.form("mapa_ren_form", border=True) if _V >= (1, 29) else st.form("mapa_ren_form"):
+                st.markdown("**✏️ Renombrar** (el nombre cambia también en Admin → Mesas)")
+                nuevos = {i: st.text_input(f"{por_id[i]['nombre']} ({NOMBRE_ZONA[zona_mapa(por_id[i])]})", por_id[i]["nombre"],
+                                           key=f"mapa_ren_{i}_{por_id[i]['nombre']}") for i in elegidas}
+                if st.form_submit_button("💾 Guardar nombres", type="primary"):
+                    n_ok, errs_r = renombrar_mesas(nuevos, mesas)
+                    st.session_state["_mapa_msg"] = (not errs_r, f"Se renombraron {n_ok} mesa(s)." + (" " + " | ".join(errs_r[:3]) if errs_r else ""))
+                    st.rerun()
             nombres_sel = ", ".join(por_id[i]["nombre"] for i in elegidas[:8]) + ("…" if len(elegidas) > 8 else "")
             confirmar_eliminar("mapa_del", f"Se eliminan {len(elegidas)} mesa(s): {nombres_sel}. No se puede si tienen una cuenta abierta. "
                                f"Las cuentas pasadas conservan el nombre de la mesa.",
@@ -4351,16 +4420,36 @@ def _bloque_qr_cuentas(com, monto, cuentas):
         return False
     fecha, hoy = CFG.get("qr_activos_fecha"), datetime.now(TZ).strftime("%Y-%m-%d")
     if fecha and fecha != hoy:
-        st.warning(f"Los QR habilitados se eligieron el {fecha[8:]}/{fecha[5:7]}. Verificá que sean los de hoy (Admin → Pagos).")
+        try:
+            dias = (datetime.strptime(hoy, "%Y-%m-%d") - datetime.strptime(fecha, "%Y-%m-%d")).days
+        except Exception:
+            dias = 0
+        if dias > 6:
+            st.warning(f"Los QR habilitados se eligieron el {fecha[8:]}/{fecha[5:7]}. Verificá que sean los vigentes (Admin → Pagos).")
+        else:
+            st.caption(f"QR habilitados el {fecha[8:]}/{fecha[5:7]}.")
     if qrcode is None:
         st.warning("Para generar códigos QR falta el paquete `qrcode[pil]` en requirements.txt.")
     ck, ids = f"qs_{com['id']}", [c["id"] for c in act]
     if st.session_state.get(ck) not in ids:
         st.session_state[ck] = ids[0]
-    if len(act) > 1:
-        st.markdown("**¿A qué cuenta paga el cliente?**")
-        cols = st.columns(min(len(act), 3))
-        for n, c in enumerate(act):
+    # 1º la billetera, 2º (si hay varios) cuál de sus QR
+    wallets = list(dict.fromkeys(c.get("proveedor") or "otro" for c in act))
+    actual = next(c for c in act if c["id"] == st.session_state[ck])
+    w_act = actual.get("proveedor") or "otro"
+    if len(wallets) > 1:
+        st.markdown("**¿Con qué billetera paga el cliente?**")
+        cols = st.columns(min(len(wallets), 3))
+        for n, w in enumerate(wallets):
+            if cols[n % len(cols)].button(PROV_NOMBRE.get(w, "Otra"), key=f"qsw_{com['id']}_{w}",
+                                          type="primary" if w == w_act else "secondary", **STRETCH):
+                st.session_state[ck] = next(c["id"] for c in act if (c.get("proveedor") or "otro") == w)
+                st.rerun()
+    de_w = [c for c in act if (c.get("proveedor") or "otro") == w_act]
+    if len(de_w) > 1:
+        st.markdown("**¿Qué QR?**")
+        cols = st.columns(min(len(de_w), 3))
+        for n, c in enumerate(de_w):
             if cols[n % len(cols)].button(c["nombre"], key=f"qsb_{com['id']}_{c['id']}",
                                           type="primary" if st.session_state[ck] == c["id"] else "secondary", **STRETCH):
                 st.session_state[ck] = c["id"]
@@ -4693,7 +4782,8 @@ def cargar_ejemplo():
 # ─────────────────────────────────────────
 def confirmar_eliminar(key, aviso, accion, etiqueta="Eliminar"):
     """Botón rojo 'Eliminar' que pide confirmación. accion() devuelve (ok, mensaje)."""
-    with st.popover(etiqueta if ICON_DEL else "🗑️ " + etiqueta, **ICON_DEL):
+    caja = st.container(key=f"del_pop_{key}") if ICON_OK else st.container()
+    with caja, st.popover(etiqueta if ICON_DEL else "🗑️ " + etiqueta, **ICON_DEL):
         st.warning(aviso)
         if st.button("Sí, eliminar definitivamente", key=f"del_{key}", type="primary", **ICON_DEL):
             try:
@@ -5253,7 +5343,7 @@ def _img_qr_b64(up):
     img = Image.open(up).convert("RGB")
     img.thumbnail((900, 900))
     buf = io.BytesIO()
-    img.save(buf, "PNG")
+    img.save(buf, "PNG", optimize=True)
     return base64.b64encode(buf.getvalue()).decode()
 
 
@@ -5266,80 +5356,111 @@ def eliminar_qr_cuenta(c):
     return True, f"QR «{c['nombre']}» eliminado."
 
 
+def _nom_qr(cuentas, i):
+    return next((c["nombre"] for c in cuentas if c["id"] == i), "")
+
+
 def admin_qr_cuentas():
     cuentas = qr_cuentas()
     activos = [i for i in qr_activos_ids() if any(c["id"] == i for c in cuentas)]
-    st.markdown("#### 📱 QR / cuentas para cobrar")
-    st.caption("Cargá todas las cuentas QR que tengan (sin límite: Mercado Pago de cada dueño, MODO, Ualá, etc.) "
-               "y elegí abajo cuáles se usan HOY. En Cobro, el mozo solo ve las habilitadas.")
+    provs = [s_ for s_, _, _ in PROVEEDORES]
+    st.markdown("#### 📱 QR por billetera virtual")
+    st.caption("Cargá **todos los QR que quieran** en cada billetera (Mercado Pago, MODO, Ualá, etc.), por ejemplo uno distinto por fin de semana. "
+               "Después elegí cuáles se muestran en Cobro: el mozo solo ve los habilitados.")
+
+    # ── 1) Elegir qué QR se muestran, ordenados por billetera ──
+    con_qr = [p_ for p_ in provs if any(c.get("proveedor") == p_ for c in cuentas)]
+    con_qr += [p_ for p_ in {c.get("proveedor") for c in cuentas} if p_ not in provs]
     if cuentas:
-        elegidos = st.multiselect("✅ QR habilitados para hoy (elegilos antes de abrir)", [c["id"] for c in cuentas], default=activos,
-                                  format_func=lambda i: next(c["nombre"] for c in cuentas if c["id"] == i), key="qr_hoy")
-        f = CFG.get("qr_activos_fecha")
-        c1, c2 = st.columns([1, 2])
-        if c1.button("💾 Guardar QR de hoy", type="primary", key="qr_hoy_ok", **STRETCH):
+        st.markdown("##### ✅ ¿Qué QR se muestran?")
+        with st.form("qr_hoy_form"):
+            elegidos = []
+            for pv in con_qr:
+                del_pv = [c for c in cuentas if c.get("proveedor") == pv]
+                st.markdown(chip(pv) if pv in PROV_NOMBRE else f"**{pv}**", unsafe_allow_html=True)
+                elegidos += st.multiselect(f"{PROV_NOMBRE.get(pv, pv)} · {len(del_pv)} QR cargado(s)", [c["id"] for c in del_pv],
+                                           default=[i for i in activos if any(c["id"] == i for c in del_pv)],
+                                           format_func=lambda i: _nom_qr(cuentas, i), key=f"qr_hoy_{pv}_{'-'.join(c['id'] for c in del_pv)}",
+                                           placeholder="Ninguno habilitado")
+            guardar = st.form_submit_button("💾 Guardar QR habilitados", type="primary")
+        if guardar:
             cfg_set("qr_activos", json.dumps(elegidos))
             cfg_set("qr_activos_fecha", datetime.now(TZ).strftime("%Y-%m-%d"))
-            log("qr_jornada", ", ".join(next(c["nombre"] for c in cuentas if c["id"] == i) for i in elegidos) or "ninguno")
-            st.toast("QR de la jornada guardados ✅")
+            log("qr_jornada", ", ".join(_nom_qr(cuentas, i) for i in elegidos) or "ninguno")
+            st.toast("QR habilitados guardados ✅")
             st.rerun()
-        c2.caption(f"Última selección: {f[8:]}/{f[5:7]}" if f else "Todavía no elegiste los QR de la jornada.")
+        f = CFG.get("qr_activos_fecha")
+        st.caption(f"Última selección: {f[8:]}/{f[5:7]}" if f else "Todavía no elegiste qué QR mostrar.")
         if not activos:
             st.warning("Ahora no hay ningún QR habilitado: el cobro por QR queda bloqueado hasta que elijas uno.")
-    with st.expander("➕ Agregar una cuenta QR", expanded=not cuentas):
+
+    # ── 2) Agregar QR (uno o varios de una vez) ──
+    with st.expander("➕ Agregar QR a una billetera", expanded=not cuentas):
         with st.form("qr_nuevo", clear_on_submit=True):
             c1, c2 = st.columns(2)
-            nom = c1.text_input("Nombre para mostrar", placeholder="Ej. Mercado Pago · Juan")
-            prov = c2.selectbox("Billetera / banco", [s_ for s_, _, _ in PROVEEDORES], format_func=lambda x: PROV_NOMBRE[x])
+            prov = c1.selectbox("Billetera / banco", provs, format_func=lambda x: PROV_NOMBRE[x])
+            nom = c2.text_input("Nombre del QR", placeholder="Ej. Fin de semana 7-8 nov · Juan")
+            ups = st.file_uploader("Imagen(es) del QR de cobro: podés subir varias juntas", type=["png", "jpg", "jpeg"],
+                                   accept_multiple_files=True)
             c3, c4 = st.columns(2)
-            tit = c3.text_input("Titular de la cuenta")
+            tit = c3.text_input("Titular de la cuenta (opcional)")
             ali = c4.text_input("Alias / CVU (opcional)")
-            dato = st.text_input("Link o dato para generar el QR (si no subís la imagen)")
-            up = st.file_uploader("Imagen del QR de cobro (recomendado)", type=["png", "jpg", "jpeg"])
-            if st.form_submit_button("Agregar QR", type="primary"):
+            dato = st.text_input("Link o dato para generar el QR (solo si no subís imagen)")
+            if st.form_submit_button("Agregar", type="primary"):
                 if not nom.strip():
-                    st.error("Poné un nombre para identificar la cuenta.")
+                    st.error("Poné un nombre para identificar el QR.")
+                elif not ups and not dato.strip() and not ali.strip():
+                    st.error("Subí la imagen del QR o cargá un link/alias.")
                 else:
-                    nid = pysecrets.token_hex(3)
-                    cuentas.append({"id": nid, "nombre": nom.strip(), "proveedor": prov, "titular": tit.strip(),
-                                    "alias": ali.strip(), "dato": dato.strip()})
-                    if up:
-                        cfg_set(f"qrimg_{nid}", _img_qr_b64(up))
+                    for k, up in enumerate(ups or [None], 1):
+                        nid = pysecrets.token_hex(3)
+                        nombre = nom.strip() if len(ups or []) <= 1 else f"{nom.strip()} {k}"
+                        cuentas.append({"id": nid, "nombre": nombre, "proveedor": prov, "titular": tit.strip(),
+                                        "alias": ali.strip(), "dato": dato.strip()})
+                        if up:
+                            cfg_set(f"qrimg_{nid}", _img_qr_b64(up))
+                        log("qr_creado", f"{PROV_NOMBRE[prov]} · {nombre}")
                     cfg_set("qr_cuentas", json.dumps(cuentas))
-                    log("qr_creado", nom.strip())
                     st.rerun()
-    for c in cuentas:
-        marca = "🟢 " if c["id"] in activos else ""
-        with st.expander(f"{marca}{c['nombre']} · {PROV_NOMBRE.get(c.get('proveedor'), '')}"):
-            if CFG.get(f"qrimg_{c['id']}"):
-                st.image(base64.b64decode(CFG[f"qrimg_{c['id']}"]), width=170)
-            with st.form(f"qr_ed_{c['id']}"):
-                c1, c2 = st.columns(2)
-                nom = c1.text_input("Nombre para mostrar", c["nombre"])
-                provs = [s_ for s_, _, _ in PROVEEDORES]
-                prov = c2.selectbox("Billetera / banco", provs, index=provs.index(c["proveedor"]) if c.get("proveedor") in provs else 0,
-                                    format_func=lambda x: PROV_NOMBRE[x])
-                c3, c4 = st.columns(2)
-                tit = c3.text_input("Titular", c.get("titular") or "")
-                ali = c4.text_input("Alias / CVU", c.get("alias") or "")
-                dato = st.text_input("Link o dato para generar el QR", c.get("dato") or "")
-                up = st.file_uploader("Reemplazar imagen del QR", type=["png", "jpg", "jpeg"], key=f"qr_up_{c['id']}")
-                quitar = st.checkbox("Quitar la imagen actual", key=f"qr_q_{c['id']}")
-                if st.form_submit_button("💾 Guardar cambios", type="primary") and nom.strip():
-                    c.update({"nombre": nom.strip(), "proveedor": prov, "titular": tit.strip(), "alias": ali.strip(), "dato": dato.strip()})
-                    if up:
-                        cfg_set(f"qrimg_{c['id']}", _img_qr_b64(up))
-                    elif quitar:
-                        cfg_set(f"qrimg_{c['id']}", "")
-                    cfg_set("qr_cuentas", json.dumps(cuentas))
-                    log("qr_editado", nom.strip())
-                    st.rerun()
-            confirmar_eliminar(f"qr{c['id']}", f"Se elimina la cuenta QR «{c['nombre']}» y su imagen.",
-                               lambda c=c: eliminar_qr_cuenta(c), "Eliminar QR")
+
+    # ── 3) Editar / eliminar, agrupado por billetera ──
+    for pv in con_qr:
+        del_pv = [c for c in cuentas if c.get("proveedor") == pv]
+        with st.expander(f"{PROV_NOMBRE.get(pv, pv)} · {len(del_pv)} QR"):
+            for c in del_pv:
+                marca = "🟢 " if c["id"] in activos else "⚪ "
+                with st.expander(f"{marca}{c['nombre']}"):
+                    if CFG.get(f"qrimg_{c['id']}"):
+                        st.image(base64.b64decode(CFG[f"qrimg_{c['id']}"]), width=170)
+                    with st.form(f"qr_ed_{c['id']}"):
+                        c1, c2 = st.columns(2)
+                        nom = c1.text_input("Nombre del QR", c["nombre"])
+                        prov = c2.selectbox("Billetera / banco", provs, index=provs.index(c["proveedor"]) if c.get("proveedor") in provs else 0,
+                                            format_func=lambda x: PROV_NOMBRE[x])
+                        c3, c4 = st.columns(2)
+                        tit = c3.text_input("Titular", c.get("titular") or "")
+                        ali = c4.text_input("Alias / CVU", c.get("alias") or "")
+                        dato = st.text_input("Link o dato para generar el QR", c.get("dato") or "")
+                        up = st.file_uploader("Reemplazar imagen del QR", type=["png", "jpg", "jpeg"], key=f"qr_up_{c['id']}")
+                        quitar = st.checkbox("Quitar la imagen actual", key=f"qr_q_{c['id']}")
+                        if st.form_submit_button("💾 Guardar cambios", type="primary") and nom.strip():
+                            c.update({"nombre": nom.strip(), "proveedor": prov, "titular": tit.strip(), "alias": ali.strip(), "dato": dato.strip()})
+                            if up:
+                                cfg_set(f"qrimg_{c['id']}", _img_qr_b64(up))
+                            elif quitar:
+                                cfg_set(f"qrimg_{c['id']}", "")
+                            cfg_set("qr_cuentas", json.dumps(cuentas))
+                            log("qr_editado", nom.strip())
+                            st.rerun()
+                    confirmar_eliminar(f"qr{c['id']}", f"Se elimina el QR «{c['nombre']}» y su imagen.",
+                                       lambda c=c: eliminar_qr_cuenta(c), "Eliminar QR")
     st.divider()
 
 
 def admin_pagos():
+    if not es_dueno():
+        st.warning("Esta sección es solo para dueños.")
+        return
     admin_qr_cuentas()
     st.markdown("#### Datos de cobro del local")
     with st.form("datos_pago"):
